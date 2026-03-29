@@ -1256,7 +1256,6 @@ class WinGoBotEnhanced:
             
         except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
             logging.error(f"❌ Cannot access channel {chat_id}: {e}")
-            self.failed_peers.add(chat_id)
             if chat_id in self.resolved_peers:
                 del self.resolved_peers[chat_id]
             return False
@@ -1268,7 +1267,6 @@ class WinGoBotEnhanced:
             
         except Exception as e:
             logging.error(f"❌ User account send failed for {chat_id}: {e}")
-            self.failed_peers.add(chat_id)
             return False
 
     async def send_message_with_retry(self, context: ContextTypes.DEFAULT_TYPE, chat_id, text=None, max_retries=3, for_channel=False, media_type=None, media_file=None, caption=None, media_group=None):
