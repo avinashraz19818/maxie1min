@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import json
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING, DESCENDING
 import aiohttp
 import os
 import random
@@ -22,6 +22,7 @@ import pickle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import hashlib
+import traceback
 
 # Pyrogram for user account (premium emoji support)
 from pyrogram import Client
@@ -43,14 +44,13 @@ logging.basicConfig(
 class WinGoBotEnhanced:
     def __init__(self, bot_token, api_id=None, api_hash=None, phone=None):
         self.bot_token = bot_token
-        self.config_file = 'wingo_config.json'
-        self.templates_file = 'templates.json'
-        self.emoji_config_file = 'emoji_config.json'
-        self.mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        self.mongo = self.mongo_client[MONGO_DB_NAME]
-        self.ai_model_file = 'ai_pattern_model.pkl'  # NEW: AI model file
-        self.pattern_history_file = 'pattern_history.json'  # NEW: Pattern history
-
+        self.mongo_client = None
+        self.mongo = None
+        self.ai_model_file = 'ai_pattern_model.pkl'
+        
+        # Connect to MongoDB
+        self.connect_mongo()
+        
         # User account variables
         self.api_id = api_id
         self.api_hash = api_hash
@@ -63,7 +63,7 @@ class WinGoBotEnhanced:
         # Store emoji placeholders for auto-detection
         self.emoji_placeholders = {}
 
-        # Session tracking - FIXED
+        # Session tracking
         self.current_session = ""
         self.last_session_check = None
         self.session_ended = True
@@ -79,7 +79,7 @@ class WinGoBotEnhanced:
         # Channel management
         self.active_channels = []
         self.channel_configs = {}
-        self.channel_prediction_status = {}  # Track prediction status per channel
+        self.channel_prediction_status = {}
 
         # Track last sent message
         self.last_sent_period = None
@@ -103,10 +103,10 @@ class WinGoBotEnhanced:
         self.consecutive_wins = 0
         self.prediction_history = []
         self.last_10_results = []
-        self.pattern_memory = deque(maxlen=1000)  # Increased for AI learning
-        self.number_memory = deque(maxlen=1000)   # Increased for AI learning
-        self.recent_results = deque(maxlen=200)   # Store recent results for AI
-        self.recent_numbers = deque(maxlen=200)   # Store recent numbers for AI
+        self.pattern_memory = deque(maxlen=1000)
+        self.number_memory = deque(maxlen=1000)
+        self.recent_results = deque(maxlen=200)
+        self.recent_numbers = deque(maxlen=200)
 
         # Advanced loss prevention
         self.session_wins = 0
@@ -118,7 +118,7 @@ class WinGoBotEnhanced:
         self.ultra_safe_mode = False
         self.last_5_predictions = []
 
-        # REAL AI PATTERN RECOGNITION SYSTEM - NEW
+        # REAL AI PATTERN RECOGNITION SYSTEM
         self.ai_model = None
         self.scaler = None
         self.pattern_history = []
@@ -130,8 +130,8 @@ class WinGoBotEnhanced:
         self.min_training_samples = 100
         
         # AI Learning Parameters
-        self.pattern_window_size = 20  # Look at last 20 results for patterns
-        self.feature_count = 15  # Number of features for AI
+        self.pattern_window_size = 20
+        self.feature_count = 15
         self.ai_prediction_history = deque(maxlen=200)
         
         # Advanced pattern weights with AI adjustment
@@ -143,7 +143,7 @@ class WinGoBotEnhanced:
             'alternating': 0.05,
             'random_walk': 0.15,
             'history_trend': 0.20,
-            'ai_pattern': 0.45  # NEW: AI gets highest weight
+            'ai_pattern': 0.45
         }
 
         # AI Pattern Learning
@@ -153,19 +153,19 @@ class WinGoBotEnhanced:
         self.recent_patterns = deque(maxlen=100)
         
         # Pattern detection variables
-        self.big_small_history = deque(maxlen=500)  # Increased for AI
+        self.big_small_history = deque(maxlen=500)
         self.number_distribution = {i: 0 for i in range(10)}
         self.prediction_streak_threshold = 3
-        self.last_actual_results = deque(maxlen=100)  # Increased for AI
+        self.last_actual_results = deque(maxlen=100)
         
-        # NEW: AI Statistics
+        # AI Statistics
         self.ai_correct_predictions = 0
         self.ai_total_predictions = 0
         self.ai_accuracy = 0.0
         self.ai_learning_cycles = 0
         self.last_ai_pattern_used = None
         
-        # NEW: Advanced Pattern Types
+        # Advanced Pattern Types
         self.pattern_types = {
             'alternating': 0,
             'streak': 0,
@@ -196,25 +196,44 @@ class WinGoBotEnhanced:
         # Track which custom messages have been sent in current break
         self.sent_custom_messages_in_break = {}
         
-        # Initialize configurations
+        # Initialize configurations from MongoDB
         self.initialize_configs()
         
-        # NEW: Initialize AI Model
+        # Initialize AI Model
         self.initialize_ai_model()
 
-    def initialize_ai_model(self):
-        """Initialize AI Pattern Recognition Model"""
+    def connect_mongo(self):
+        """Connect to MongoDB"""
         try:
-            if os.path.exists(self.ai_model_file):
-                with open(self.ai_model_file, 'rb') as f:
-                    saved_data = pickle.load(f)
-                    self.ai_model = saved_data.get('model')
-                    self.scaler = saved_data.get('scaler')
-                    self.pattern_database = saved_data.get('pattern_database', {})
-                    self.ai_accuracy = saved_data.get('ai_accuracy', 0.0)
-                    self.ai_correct_predictions = saved_data.get('ai_correct_predictions', 0)
-                    self.ai_total_predictions = saved_data.get('ai_total_predictions', 0)
-                logging.info(f"✅ AI Model loaded: Accuracy = {self.ai_accuracy:.2%}")
+            self.mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+            self.mongo_client.admin.command('ping')
+            self.mongo = self.mongo_client[MONGO_DB_NAME]
+            logging.info("✅ Connected to MongoDB successfully")
+            
+            # Create indexes for better performance
+            self.mongo.pattern_history.create_index([("timestamp", DESCENDING)])
+            self.mongo.predictions.create_index([("period", ASCENDING)])
+            self.mongo.ai_predictions.create_index([("timestamp", DESCENDING)])
+            
+        except Exception as e:
+            logging.error(f"❌ MongoDB connection error: {e}")
+            raise
+
+    def initialize_ai_model(self):
+        """Initialize AI Pattern Recognition Model from MongoDB"""
+        try:
+            ai_model_doc = self.mongo.ai_models.find_one({'_id': 'current_model'})
+            
+            if ai_model_doc and 'model_data' in ai_model_doc:
+                model_data = ai_model_doc['model_data']
+                self.ai_model = pickle.loads(model_data['model_bytes']) if 'model_bytes' in model_data else None
+                self.scaler = pickle.loads(model_data['scaler_bytes']) if 'scaler_bytes' in model_data else None
+                self.pattern_database = model_data.get('pattern_database', {})
+                self.ai_accuracy = model_data.get('ai_accuracy', 0.0)
+                self.ai_correct_predictions = model_data.get('ai_correct_predictions', 0)
+                self.ai_total_predictions = model_data.get('ai_total_predictions', 0)
+                self.ai_learning_cycles = model_data.get('ai_learning_cycles', 0)
+                logging.info(f"✅ AI Model loaded from MongoDB: Accuracy = {self.ai_accuracy:.2%}")
             else:
                 self.ai_model = RandomForestClassifier(
                     n_estimators=100,
@@ -225,13 +244,16 @@ class WinGoBotEnhanced:
                 self.scaler = StandardScaler()
                 self.pattern_database = {}
                 logging.info("✅ New AI Model created")
-                
-            # Load pattern history
-            if os.path.exists(self.pattern_history_file):
-                with open(self.pattern_history_file, 'r', encoding='utf-8') as f:
-                    self.pattern_history = json.load(f)
-                logging.info(f"✅ Pattern history loaded: {len(self.pattern_history)} patterns")
-                
+            
+            pattern_history_cursor = self.mongo.pattern_history.find().sort('timestamp', DESCENDING).limit(1000)
+            self.pattern_history = list(pattern_history_cursor)
+            logging.info(f"✅ Pattern history loaded from MongoDB: {len(self.pattern_history)} patterns")
+            
+            ai_history_cursor = self.mongo.ai_predictions.find().sort('timestamp', DESCENDING).limit(200)
+            for doc in ai_history_cursor:
+                self.ai_prediction_history.append(doc)
+            logging.info(f"✅ AI prediction history loaded: {len(self.ai_prediction_history)} records")
+            
         except Exception as e:
             logging.error(f"❌ Error initializing AI model: {e}")
             self.ai_model = RandomForestClassifier(
@@ -244,36 +266,38 @@ class WinGoBotEnhanced:
             self.pattern_database = {}
 
     def save_ai_model(self):
-        """Save AI Model and pattern database"""
+        """Save AI Model and pattern database to MongoDB"""
         try:
-            saved_data = {
-                'model': self.ai_model,
-                'scaler': self.scaler,
+            model_bytes = pickle.dumps(self.ai_model) if self.ai_model else None
+            scaler_bytes = pickle.dumps(self.scaler) if self.scaler else None
+            
+            model_data = {
+                'model_bytes': model_bytes,
+                'scaler_bytes': scaler_bytes,
                 'pattern_database': self.pattern_database,
                 'ai_accuracy': self.ai_accuracy,
                 'ai_correct_predictions': self.ai_correct_predictions,
-                'ai_total_predictions': self.ai_total_predictions
+                'ai_total_predictions': self.ai_total_predictions,
+                'ai_learning_cycles': self.ai_learning_cycles,
+                'updated_at': datetime.utcnow()
             }
-            with open(self.ai_model_file, 'wb') as f:
-                pickle.dump(saved_data, f)
             
-            # Save pattern history
-            with open(self.pattern_history_file, 'w', encoding='utf-8') as f:
-                json.dump(self.pattern_history, f, indent=2, ensure_ascii=False)
-                
-            logging.info(f"✅ AI Model saved: Accuracy = {self.ai_accuracy:.2%}")
+            self.mongo.ai_models.update_one(
+                {'_id': 'current_model'},
+                {'$set': {'model_data': model_data, 'updated_at': datetime.utcnow()}},
+                upsert=True
+            )
+            logging.info(f"✅ AI Model saved to MongoDB: Accuracy = {self.ai_accuracy:.2%}")
         except Exception as e:
-            logging.error(f"❌ Error saving AI model: {e}")
+            logging.error(f"❌ Error saving AI model to MongoDB: {e}")
 
     def extract_features_for_ai(self, results, numbers):
         """Extract advanced features for AI pattern recognition"""
         features = []
         
         if len(results) < self.pattern_window_size:
-            # Return default features if not enough data
             return [0] * self.feature_count
         
-        # Convert results to numerical (BIG=1, SMALL=0)
         result_numeric = [1 if r == 'BIG' else 0 for r in results]
         recent_results = result_numeric[:self.pattern_window_size]
         recent_numbers = numbers[:self.pattern_window_size]
@@ -287,17 +311,17 @@ class WinGoBotEnhanced:
                 break
         features.append(current_streak)
         
-        # 2. Moving averages (3, 5, 10 periods)
-        features.append(np.mean(recent_results[:3]))
-        features.append(np.mean(recent_results[:5]))
-        features.append(np.mean(recent_results[:10]))
+        # 2. Moving averages
+        features.append(np.mean(recent_results[:3]) if len(recent_results) >= 3 else 0)
+        features.append(np.mean(recent_results[:5]) if len(recent_results) >= 5 else 0)
+        features.append(np.mean(recent_results[:10]) if len(recent_results) >= 10 else 0)
         
         # 3. Balance features
         big_count = sum(recent_results)
         small_count = len(recent_results) - big_count
         features.append(big_count)
         features.append(small_count)
-        features.append(big_count - small_count)  # Imbalance
+        features.append(big_count - small_count)
         
         # 4. Number pattern features
         big_numbers = sum(1 for n in recent_numbers if n >= 5)
@@ -310,7 +334,7 @@ class WinGoBotEnhanced:
         for i in range(1, len(recent_results)):
             if recent_results[i] != recent_results[i-1]:
                 alternating_score += 1
-        features.append(alternating_score / len(recent_results))
+        features.append(alternating_score / len(recent_results) if len(recent_results) > 0 else 0)
         
         # 6. Gap analysis
         last_big_gap = 0
@@ -328,11 +352,10 @@ class WinGoBotEnhanced:
         
         # 7. Number frequency features
         number_counts = [recent_numbers.count(i) for i in range(10)]
-        features.extend(number_counts[:3])  # Top 3 frequent numbers
+        features.extend(number_counts[:3])
         
         # 8. Pattern type detection
         pattern_hash = self.calculate_pattern_hash(recent_results)
-        pattern_type = self.identify_pattern_type(recent_results)
         pattern_score = self.pattern_database.get(pattern_hash, {}).get('success_rate', 0.5)
         features.append(pattern_score)
         
@@ -343,10 +366,10 @@ class WinGoBotEnhanced:
         else:
             features.append(0)
         
-        # 10. Volatility (changes per period)
+        # 10. Volatility
         changes = sum(1 for i in range(1, len(recent_results)) 
                      if recent_results[i] != recent_results[i-1])
-        features.append(changes / len(recent_results))
+        features.append(changes / len(recent_results) if len(recent_results) > 0 else 0)
         
         # Ensure we have exactly feature_count features
         if len(features) < self.feature_count:
@@ -365,7 +388,6 @@ class WinGoBotEnhanced:
         """Identify type of pattern"""
         pattern = list(pattern)
         
-        # Check for alternating pattern
         alternating = True
         for i in range(1, len(pattern)):
             if pattern[i] == pattern[i-1]:
@@ -373,9 +395,9 @@ class WinGoBotEnhanced:
                 break
         
         if alternating:
+            self.pattern_types['alternating'] += 1
             return 'alternating'
         
-        # Check for streak
         streak_count = 1
         max_streak = 1
         for i in range(1, len(pattern)):
@@ -386,14 +408,14 @@ class WinGoBotEnhanced:
                 streak_count = 1
         
         if max_streak >= 3:
+            self.pattern_types['streak'] += 1
             return 'streak'
         
-        # Check for zigzag (small alternating with occasional same)
         changes = sum(1 for i in range(1, len(pattern)) if pattern[i] != pattern[i-1])
         if changes >= len(pattern) * 0.7:
+            self.pattern_types['zigzag'] += 1
             return 'zigzag'
         
-        # Check for clusters
         clusters = 0
         in_cluster = False
         for i in range(1, len(pattern)):
@@ -404,18 +426,20 @@ class WinGoBotEnhanced:
                 in_cluster = False
         
         if clusters >= 2:
+            self.pattern_types['cluster'] += 1
             return 'cluster'
         
+        self.pattern_types['random'] += 1
         return 'random'
 
     def learn_from_pattern(self, pattern_hash, prediction, was_correct):
-        """Learn from pattern outcome"""
+        """Learn from pattern outcome and save to MongoDB"""
         if pattern_hash not in self.pattern_database:
             self.pattern_database[pattern_hash] = {
                 'pattern': pattern_hash,
                 'total_occurrences': 0,
                 'correct_predictions': 0,
-                'last_seen': datetime.now().isoformat(),
+                'last_seen': datetime.utcnow().isoformat(),
                 'prediction_history': []
             }
         
@@ -426,56 +450,54 @@ class WinGoBotEnhanced:
             pattern_data['correct_predictions'] += 1
         
         pattern_data['success_rate'] = pattern_data['correct_predictions'] / pattern_data['total_occurrences']
-        pattern_data['last_seen'] = datetime.now().isoformat()
+        pattern_data['last_seen'] = datetime.utcnow().isoformat()
         pattern_data['prediction_history'].append({
             'prediction': prediction,
             'was_correct': was_correct,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.utcnow().isoformat()
         })
         
-        # Keep only last 50 predictions in history
         if len(pattern_data['prediction_history']) > 50:
             pattern_data['prediction_history'] = pattern_data['prediction_history'][-50:]
         
-        # Update AI statistics
         self.ai_total_predictions += 1
         if was_correct:
             self.ai_correct_predictions += 1
         
         self.ai_accuracy = self.ai_correct_predictions / self.ai_total_predictions if self.ai_total_predictions > 0 else 0
         
-        # Save to pattern history
-        self.pattern_history.append({
+        pattern_record = {
             'pattern_hash': pattern_hash,
             'prediction': prediction,
             'was_correct': was_correct,
-            'timestamp': datetime.now().isoformat(),
-            'ai_confidence': getattr(self, 'last_ai_confidence', 0.5)
-        })
+            'timestamp': datetime.utcnow(),
+            'ai_confidence': getattr(self, 'last_ai_confidence', 0.5),
+            'success_rate': pattern_data['success_rate']
+        }
         
-        # Keep only last 1000 patterns in history
+        self.mongo.pattern_history.insert_one(pattern_record)
+        
+        self.pattern_history.append(pattern_record)
         if len(self.pattern_history) > 1000:
             self.pattern_history = self.pattern_history[-1000:]
         
-        # Retrain AI model periodically
         if self.ai_total_predictions % 50 == 0:
             self.retrain_ai_model()
+        
+        self.save_ai_model()
 
     def retrain_ai_model(self):
-        """Retrain AI model with new data"""
+        """Retrain AI model with new data from MongoDB"""
         if len(self.pattern_history) < self.min_training_samples:
             return
         
         try:
             logging.info(f"🔄 Retraining AI model with {len(self.pattern_history)} samples...")
             
-            # Prepare training data
             X_train = []
             y_train = []
             
             for pattern_data in self.pattern_history:
-                # We need to reconstruct features from pattern history
-                # For now, we'll train on simpler features
                 if 'features' in pattern_data:
                     X_train.append(pattern_data['features'])
                     y_train.append(1 if pattern_data['was_correct'] else 0)
@@ -483,7 +505,6 @@ class WinGoBotEnhanced:
             if len(X_train) < self.min_training_samples:
                 return
             
-            # Train the model
             X_train_array = np.array(X_train)
             y_train_array = np.array(y_train)
             
@@ -505,13 +526,11 @@ class WinGoBotEnhanced:
             if len(results) < self.pattern_window_size:
                 return None, 0.5
             
-            # Extract features
             features = self.extract_features_for_ai(results, numbers)
             
             if len(features) < self.feature_count:
                 return None, 0.5
             
-            # Scale features
             features_array = np.array([features])
             
             if hasattr(self.scaler, 'scale_'):
@@ -519,20 +538,15 @@ class WinGoBotEnhanced:
             else:
                 features_scaled = features_array
             
-            # Make prediction
             if hasattr(self.ai_model, 'predict_proba'):
                 proba = self.ai_model.predict_proba(features_scaled)[0]
                 prediction_proba = max(proba)
                 prediction_class = self.ai_model.predict(features_scaled)[0]
             else:
-                # Fallback if model not trained
                 return None, 0.5
             
-            # Convert to BIG/SMALL prediction
-            # Assuming class 1 = BIG, class 0 = SMALL
             prediction = 'BIG' if prediction_class == 1 else 'SMALL'
             
-            # Calculate pattern hash for learning
             result_numeric = [1 if r == 'BIG' else 0 for r in results[:self.pattern_window_size]]
             pattern_hash = self.calculate_pattern_hash(result_numeric)
             
@@ -554,7 +568,7 @@ class WinGoBotEnhanced:
         if not data_list or len(data_list) < 10:
             return random.choice(['BIG', 'SMALL']), 50
         
-        recent_data = data_list[:50]  # Use more data for AI
+        recent_data = data_list[:50]
         results = [item['big_small'] for item in recent_data]
         numbers = [item['number'] for item in recent_data]
         
@@ -562,47 +576,34 @@ class WinGoBotEnhanced:
         logging.info(f"Last 10 results: {results[:10]}")
         logging.info(f"Last 10 numbers: {numbers[:10]}")
         
-        # Get AI prediction
         ai_prediction, ai_confidence = self.predict_with_ai(results, numbers)
         
-        # Get traditional prediction
         patterns = self.detect_winning_patterns(results, numbers)
         strategies = self.calculate_winning_strategies(patterns)
         trad_prediction, trad_confidence = self.combine_winning_strategies(strategies)
         
-        # Combine AI and traditional predictions
         final_prediction = None
         final_confidence = 0
         
         if ai_prediction and ai_confidence > self.ai_confidence_threshold:
-            # Use AI prediction if confidence is high
             final_prediction = ai_prediction
             final_confidence = ai_confidence * 100
             logging.info(f"🤖 AI Prediction: {ai_prediction} ({ai_confidence:.2%} confidence)")
             
-            # Update AI weight based on accuracy
             if self.ai_accuracy > 0.7:
                 self.pattern_weights['ai_pattern'] = 0.55
             else:
                 self.pattern_weights['ai_pattern'] = 0.45
-                
         else:
-            # Fall back to traditional prediction
             final_prediction = trad_prediction
             final_confidence = trad_confidence
             logging.info(f"📊 Traditional Prediction: {trad_prediction} ({trad_confidence:.1f}%)")
         
-        # Safety checks
         if self.consecutive_losses >= 3:
             logging.info(f"🔴 CRITICAL: {self.consecutive_losses} consecutive losses!")
-            if final_prediction == 'BIG':
-                final_prediction = 'SMALL'
-                final_confidence = 75
-            else:
-                final_prediction = 'BIG'
-                final_confidence = 75
+            final_prediction = 'BIG' if final_prediction == 'SMALL' else 'SMALL'
+            final_confidence = 75
         
-        # Don't predict same thing too many times
         recent_predictions = list(self.big_small_history)
         if len(recent_predictions) >= 5:
             recent_predictions = recent_predictions[-5:]
@@ -611,10 +612,7 @@ class WinGoBotEnhanced:
                 final_prediction = 'BIG' if final_prediction == 'SMALL' else 'SMALL'
                 final_confidence = max(60, final_confidence - 10)
         
-        # Store prediction in history
         self.big_small_history.append(final_prediction)
-        
-        # Update statistics
         self.last_ai_confidence = ai_confidence if ai_prediction else 0
         
         logging.info(f"🎯 FINAL PREDICTION: {final_prediction} ({final_confidence:.1f}%)")
@@ -624,21 +622,13 @@ class WinGoBotEnhanced:
         return final_prediction, final_confidence
 
     def initialize_configs(self):
-        """Initialize all configurations properly"""
-        # First load emoji config
-        self.load_emoji_config()
-        
-        # Then load main config
+        """Initialize all configurations from MongoDB"""
         self.load_config()
-        
-        # Ensure emoji config has all required keys
+        self.load_emoji_config()
         self.ensure_emoji_config_keys()
 
     def ensure_emoji_config_keys(self):
         """Ensure all required keys exist in emoji config"""
-        if not hasattr(self, 'emoji_config'):
-            self.load_emoji_config()
-        
         required_keys = ['premium_emojis', 'regular_emojis', 'emoji_to_placeholder', 'placeholder_to_emoji']
         
         for key in required_keys:
@@ -710,17 +700,14 @@ class WinGoBotEnhanced:
             return ""
         
         try:
-            # First, auto-convert any regular emojis to placeholders
             text = self.auto_detect_and_convert_message(text)
-            
-            # Then convert placeholders to appropriate emojis
             return self.convert_placeholder_to_premium_emoji(text, for_channel)
         except Exception as e:
             logging.error(f"❌ Error formatting promo text: {e}")
             return text
 
     def load_emoji_config(self):
-        """Load emoji configurations from separate file"""
+        """Load emoji configurations from MongoDB"""
         default_emoji_config = {
             "premium_emojis": {
                 "fire": "<emoji id=5420315771991497307>🔥</emoji>",
@@ -833,28 +820,32 @@ class WinGoBotEnhanced:
         }
         
         try:
-            if os.path.exists(self.emoji_config_file):
-                with open(self.emoji_config_file, 'r', encoding='utf-8') as f:
-                    self.emoji_config = json.load(f)
-                logging.info("✅ Emoji configuration loaded from file")
+            doc = self.mongo.meta.find_one({'_id': 'emoji_config'})
+            if doc and 'data' in doc:
+                self.emoji_config = doc['data']
+                logging.info("✅ Emoji configuration loaded from MongoDB")
             else:
                 self.emoji_config = default_emoji_config
                 self.save_emoji_config()
-                logging.info("✅ Created default emoji configuration file")
+                logging.info("✅ Created default emoji configuration in MongoDB")
         except Exception as e:
-            logging.error(f"❌ Error loading emoji config: {e}")
+            logging.error(f"❌ Error loading emoji config from MongoDB: {e}")
             self.emoji_config = default_emoji_config
             self.save_emoji_config()
         
         self.ensure_emoji_config_keys()
 
     def save_emoji_config(self):
-        """Save emoji configuration"""
+        """Save emoji configuration to MongoDB"""
         try:
-            self.mongo.meta.update_one({'_id':'emoji_config'},{'$set':{'data':self.emoji_config}},upsert=True)
-            logging.info("✅ Emoji configuration saved")
+            self.mongo.meta.update_one(
+                {'_id': 'emoji_config'},
+                {'$set': {'data': self.emoji_config, 'updated_at': datetime.utcnow()}},
+                upsert=True
+            )
+            logging.info("✅ Emoji configuration saved to MongoDB")
         except Exception as e:
-            logging.error(f"❌ Error saving emoji config: {e}")
+            logging.error(f"❌ Error saving emoji config to MongoDB: {e}")
 
     def get_emoji(self, emoji_key, for_channel=False):
         """Get emoji"""
@@ -889,7 +880,6 @@ class WinGoBotEnhanced:
         
         except Exception as e:
             logging.error(f"❌ Error converting emojis to placeholders: {e}")
-            pass
         
         return text
 
@@ -968,59 +958,27 @@ class WinGoBotEnhanced:
             
             converted_text = message_text
             
-            emojis_found = []
             for emoji, placeholder in self.emoji_config['emoji_to_placeholder'].items():
                 if emoji in converted_text:
-                    emojis_found.append(f"{emoji}->{placeholder}")
                     converted_text = converted_text.replace(emoji, placeholder)
             
-            if emojis_found:
-                logging.info(f"✅ Auto-converted emojis: {', '.join(emojis_found[:5])}{'...' if len(emojis_found) > 5 else ''}")
-            
-            import emoji
-            emoji_list = emoji.emoji_list(message_text)
-            for emoji_data in emoji_list:
-                emoji_char = emoji_data['emoji']
-                if emoji_char not in self.emoji_config['emoji_to_placeholder']:
-                    emoji_name = emoji.demojize(emoji_char).replace(':', '').replace('_', '')
-                    placeholder = f"{{{emoji_name}}}"
-                    
-                    self.emoji_config['emoji_to_placeholder'][emoji_char] = placeholder
-                    self.emoji_config['placeholder_to_emoji'][placeholder] = emoji_char
-                    self.emoji_config['regular_emojis'][emoji_name] = emoji_char
-                    
-                    premium_emojis = {
-                        "🔥": "<emoji id=5420315771991497307>🔥</emoji>",
-                        "👑": "<emoji id=6266995104687330978>👑</emoji>",
-                        "✨": "<emoji id=6285088169817805553>✨</emoji>",
-                        "🚀": "<emoji id=5188481279963715781>🚀</emoji>",
-                        "💰": "<emoji id=6267068789146260253>💰</emoji>",
-                        "📊": "<emoji id=5431577498364158238>📊</emoji>",
-                        "🎯": "<emoji id=5310278924616356636>🎯</emoji>",
-                        "🏆": "<emoji id=5413566144986503832>🏆</emoji>",
-                        "🎁": "<emoji id=5384578448633129482>🎁</emoji>",
-                        "⚡": "<emoji id=6267107057304868214>⚡</emoji>",
-                        "⭐": "<emoji id=5435957248314579621>⭐</emoji>",
-                        "⚠️": "<emoji id=6267039884016358504>⚠️</emoji>",
-                        "✅": "<emoji id=6267008582294705964>✅</emoji>",
-                        "❌": "<emoji id=5343968063970632884>❌</emoji>",
-                        "⏰": "<emoji id=5386415655253730366>⏰</emoji>",
-                        "🔗": "<emoji id=4958689671950369798>🔗</emoji>",
-                        "🌙": "<emoji id=5208554136039073738>🌙</emoji>",
-                        "🌅": "<emoji id=5413883478645169306>🌅</emoji>",
-                        "☕": "<emoji id=5451959871257713464>☕</emoji>",
-                        "💤": "<emoji id=5359543311897998264>💤</emoji>",
-                        "⏸️": "<emoji id=5359543311897998264>⏸️</emoji>",
-                        "🔄": "<emoji id=5264727218734524899>🔄</emoji>",
-                        "🎉": "<emoji id=5436040291507247633>🎉</emoji>",
-                        "💸": "<emoji id=5472030678633684592>💸</emoji>",
-                        "🌟": "<emoji id=5458799228719472718>🌟</emoji>",
-                    }
-                    if emoji_char in premium_emojis:
-                        self.emoji_config['premium_emojis'][emoji_name] = premium_emojis[emoji_char]
-                    
-                    logging.info(f"✅ Auto-added new emoji: {emoji_char} -> {placeholder}")
-                    converted_text = converted_text.replace(emoji_char, placeholder)
+            try:
+                import emoji
+                emoji_list = emoji.emoji_list(message_text)
+                for emoji_data in emoji_list:
+                    emoji_char = emoji_data['emoji']
+                    if emoji_char not in self.emoji_config['emoji_to_placeholder']:
+                        emoji_name = emoji.demojize(emoji_char).replace(':', '').replace('_', '')
+                        placeholder = f"{{{emoji_name}}}"
+                        
+                        self.emoji_config['emoji_to_placeholder'][emoji_char] = placeholder
+                        self.emoji_config['placeholder_to_emoji'][placeholder] = emoji_char
+                        self.emoji_config['regular_emojis'][emoji_name] = emoji_char
+                        
+                        logging.info(f"✅ Auto-added new emoji: {emoji_char} -> {placeholder}")
+                        converted_text = converted_text.replace(emoji_char, placeholder)
+            except ImportError:
+                pass
             
             self.save_emoji_config()
             return converted_text
@@ -1030,14 +988,12 @@ class WinGoBotEnhanced:
             return message_text
 
     async def initialize_user_client(self):
-        """Initialize Pyrogram user client"""
+        """Initialize Pyrogram user client with better error handling"""
         if not self.use_user_account:
             logging.warning("User account not configured. Using regular emojis.")
             return False
         
         try:
-            session_exists = os.path.exists("user_session.session")
-            
             self.user_app = Client(
                 "user_session",
                 api_id=self.api_id,
@@ -1064,7 +1020,7 @@ class WinGoBotEnhanced:
             return False
 
     async def resolve_all_channels(self):
-        """Resolve all channel peers"""
+        """Resolve all channel peers with better error handling"""
         if not self.user_app or not self.active_channels:
             return
         
@@ -1074,29 +1030,40 @@ class WinGoBotEnhanced:
             try:
                 if channel in self.failed_peers:
                     continue
-                    
-                if channel.startswith('@'):
-                    chat = await self.user_app.get_chat(channel)
-                    self.resolved_peers[channel] = chat.id
-                    logging.info(f"✅ Resolved {channel} -> {chat.id}")
-                elif channel.lstrip('-').isdigit():
-                    channel_id = int(channel)
+                
+                channel_clean = channel.strip()
+                
+                if channel_clean.startswith('@'):
+                    try:
+                        chat = await self.user_app.get_chat(channel_clean)
+                        self.resolved_peers[channel_clean] = chat.id
+                        logging.info(f"✅ Resolved {channel_clean} -> {chat.id}")
+                    except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
+                        logging.warning(f"⚠️ Cannot access channel {channel_clean}: {e}")
+                        self.failed_peers.add(channel_clean)
+                    except Exception as e:
+                        logging.error(f"❌ Failed to resolve {channel_clean}: {e}")
+                        self.failed_peers.add(channel_clean)
+                        
+                elif channel_clean.lstrip('-').isdigit():
+                    channel_id = int(channel_clean)
                     try:
                         chat = await self.user_app.get_chat(channel_id)
-                        self.resolved_peers[channel] = channel_id
-                        logging.info(f"✅ Verified channel ID: {channel} -> {chat.title}")
+                        self.resolved_peers[channel_clean] = channel_id
+                        logging.info(f"✅ Verified channel ID: {channel_clean} -> {chat.title if hasattr(chat, 'title') else 'Unknown'}")
                     except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
-                        logging.warning(f"⚠️ Cannot access channel {channel}: {e}")
-                        self.failed_peers.add(channel)
+                        logging.warning(f"⚠️ Cannot access channel {channel_clean}: {e}")
+                        self.failed_peers.add(channel_clean)
+                    except Exception as e:
+                        logging.error(f"❌ Failed to resolve channel ID {channel_clean}: {e}")
+                        self.failed_peers.add(channel_clean)
+                else:
+                    logging.warning(f"⚠️ Invalid channel format: {channel_clean}")
+                    self.failed_peers.add(channel_clean)
                 
-            except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
-                logging.error(f"❌ Cannot access channel {channel}: {e}")
-                self.failed_peers.add(channel)
-                continue
             except Exception as e:
                 logging.error(f"❌ Failed to resolve {channel}: {e}")
                 self.failed_peers.add(channel)
-                continue
 
     async def download_media_for_user_account(self, file_id, context: ContextTypes.DEFAULT_TYPE):
         """Download media file for user account sending"""
@@ -1105,13 +1072,10 @@ class WinGoBotEnhanced:
             file_bytes = await file.download_as_bytearray()
             file_stream = BytesIO(file_bytes)
             
-            if hasattr(file, 'file_path'):
-                filename = file.file_path.split('/')[-1] if file.file_path else f"media_{file_id}"
+            if hasattr(file, 'file_path') and file.file_path:
+                filename = file.file_path.split('/')[-1]
             else:
-                filename = f"media_{file_id}"
-            
-            if '.' not in filename:
-                filename = f"{filename}.jpg"
+                filename = f"media_{file_id}.jpg"
             
             file_stream.name = filename
             return file_stream
@@ -1121,44 +1085,58 @@ class WinGoBotEnhanced:
             return None
 
     async def send_via_user_account(self, chat_id, text=None, media_type=None, media_file=None, caption=None, media_group=None, context=None):
-        """Send message using Pyrogram"""
+        """Send message using Pyrogram with better error handling - ALWAYS USE USER ACCOUNT FOR CHANNELS"""
         if not self.user_app:
             return False
         
-        if chat_id in self.failed_peers:
-            logging.info(f"⚠️ Skipping failed peer: {chat_id}")
+        chat_id_clean = chat_id.strip() if isinstance(chat_id, str) else chat_id
+        
+        if chat_id_clean in self.failed_peers:
+            logging.info(f"⚠️ Skipping failed peer: {chat_id_clean}")
             return False
         
         try:
             target_id = None
             
-            if chat_id in self.resolved_peers:
-                target_id = self.resolved_peers[chat_id]
+            if chat_id_clean in self.resolved_peers:
+                target_id = self.resolved_peers[chat_id_clean]
             else:
                 try:
-                    if str(chat_id).startswith('@'):
-                        chat = await self.user_app.get_chat(chat_id)
+                    if isinstance(chat_id_clean, str) and chat_id_clean.startswith('@'):
+                        chat = await self.user_app.get_chat(chat_id_clean)
                         target_id = chat.id
-                        self.resolved_peers[chat_id] = target_id
-                    elif str(chat_id).lstrip('-').isdigit():
-                        target_id = int(chat_id)
+                        self.resolved_peers[chat_id_clean] = target_id
+                        logging.info(f"✅ Resolved channel {chat_id_clean} to ID {target_id}")
+                    elif isinstance(chat_id_clean, str) and chat_id_clean.lstrip('-').isdigit():
+                        target_id = int(chat_id_clean)
                         try:
-                            await self.user_app.get_chat(target_id)
-                        except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant):
-                            logging.warning(f"⚠️ Channel {target_id} may not be accessible")
-                            self.failed_peers.add(chat_id)
+                            chat = await self.user_app.get_chat(target_id)
+                            self.resolved_peers[chat_id_clean] = target_id
+                            logging.info(f"✅ Verified channel ID {target_id}: {chat.title if hasattr(chat, 'title') else 'Unknown'}")
+                        except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
+                            logging.warning(f"⚠️ Channel {target_id} may not be accessible: {e}")
+                            self.failed_peers.add(chat_id_clean)
                             return False
-                        self.resolved_peers[chat_id] = target_id
+                    elif isinstance(chat_id_clean, int):
+                        target_id = chat_id_clean
+                        try:
+                            chat = await self.user_app.get_chat(target_id)
+                            self.resolved_peers[str(chat_id_clean)] = target_id
+                        except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
+                            logging.warning(f"⚠️ Channel {target_id} may not be accessible: {e}")
+                            self.failed_peers.add(str(chat_id_clean))
+                            return False
                     else:
-                        logging.error(f"❌ Invalid channel format: {chat_id}")
+                        logging.error(f"❌ Invalid channel format: {chat_id_clean}")
                         return False
                 except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
-                    logging.error(f"❌ Cannot access channel {chat_id}: {e}")
-                    self.failed_peers.add(chat_id)
+                    logging.error(f"❌ Cannot access channel {chat_id_clean}: {e}")
+                    self.failed_peers.add(chat_id_clean)
                     return False
             
+            # Send message using user account
             if media_group and len(media_group) > 1:
-                logging.info(f"📸 Sending media group with {len(media_group)} items to {chat_id}")
+                logging.info(f"📸 Sending media group with {len(media_group)} items via user account to {chat_id_clean}")
                 
                 pyrogram_media = []
                 for i, media_item in enumerate(media_group):
@@ -1185,8 +1163,8 @@ class WinGoBotEnhanced:
                             caption=media_item.get('caption', '') if i == 0 else None,
                             parse_mode=PyrogramParseMode.HTML if media_item.get('caption') else None
                         )
-                    elif media_item['type'] == 'animation':
-                        media = PyrogramInputMediaVideo(
+                    else:
+                        media = PyrogramInputMediaPhoto(
                             media=file_stream,
                             caption=media_item.get('caption', '') if i == 0 else None,
                             parse_mode=PyrogramParseMode.HTML if media_item.get('caption') else None
@@ -1198,13 +1176,14 @@ class WinGoBotEnhanced:
                         chat_id=target_id,
                         media=pyrogram_media
                     )
-                    logging.info(f"✅ Media group sent via user account to {chat_id}")
+                    logging.info(f"✅ Media group sent via user account to {chat_id_clean}")
                     return True
                 else:
                     logging.error("❌ No valid media items to send")
                     return False
                 
             elif media_type and media_file:
+                logging.info(f"📤 Sending {media_type} via user account to {chat_id_clean}")
                 file_stream = await self.download_media_for_user_account(media_file, context)
                 if not file_stream:
                     logging.error(f"❌ Failed to download media for user account: {media_file}")
@@ -1238,27 +1217,24 @@ class WinGoBotEnhanced:
                         caption=caption if caption else None,
                         parse_mode=PyrogramParseMode.HTML if caption else None
                     )
-                logging.info(f"✅ Media sent via user account to {chat_id}")
+                logging.info(f"✅ Media sent via user account to {chat_id_clean}")
                 return True
                 
             else:
                 if not text or not text.strip():
                     logging.error("❌ Text is empty!")
                     return False
-                    
+                
+                # Format text with premium emojis for user account
+                formatted_text = self.format_with_emojis(text, for_channel=True)
+                
                 await self.user_app.send_message(
                     chat_id=target_id,
-                    text=text,
+                    text=formatted_text,
                     parse_mode=PyrogramParseMode.HTML
                 )
-                logging.info(f"✅ Text sent via user account to {chat_id}")
+                logging.info(f"✅ Text sent via user account to {chat_id_clean}")
                 return True
-            
-        except (PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserNotParticipant) as e:
-            logging.error(f"❌ Cannot access channel {chat_id}: {e}")
-            if chat_id in self.resolved_peers:
-                del self.resolved_peers[chat_id]
-            return False
             
         except FloodWait as e:
             logging.warning(f"⚠️ FloodWait: Waiting {e.value}s")
@@ -1266,157 +1242,150 @@ class WinGoBotEnhanced:
             return False
             
         except Exception as e:
-            logging.error(f"❌ User account send failed for {chat_id}: {e}")
+            logging.error(f"❌ User account send failed for {chat_id_clean}: {e}")
             return False
 
     async def send_message_with_retry(self, context: ContextTypes.DEFAULT_TYPE, chat_id, text=None, max_retries=3, for_channel=False, media_type=None, media_file=None, caption=None, media_group=None):
-        """Send message with retry logic"""
+        """Send message with retry logic - ALWAYS use user account for channels"""
         
-        if chat_id in self.failed_peers and not (for_channel and self.use_user_account and self.user_app):
-            for_channel = False
-            logging.info(f"⚠️ Using bot for failed peer: {chat_id}")
+        # For channel messages, ALWAYS use user account if available
+        use_user_account = for_channel and self.use_user_account and self.user_app
         
         for attempt in range(max_retries):
             try:
-                if media_group and len(media_group) > 1:
-                    logging.info(f"📸 Sending media group with {len(media_group)} items via bot to {chat_id}")
-                    
-                    telegram_media = []
-                    for i, media_item in enumerate(media_group):
-                        caption_text = media_item.get('caption', '')
-                        
-                        if caption_text:
-                            if for_channel and self.use_user_account:
-                                caption_text = self.format_with_emojis(caption_text, for_channel=True)
-                            else:
-                                caption_text = self.format_with_emojis(caption_text, for_channel=False)
-                        
-                        if media_item['type'] == 'photo':
-                            media = InputMediaPhoto(
-                                media=media_item['media'],
-                                caption=caption_text if i == 0 else None,
-                                parse_mode=ParseMode.HTML if caption_text else None
-                            )
-                        elif media_item['type'] == 'video':
-                            media = InputMediaVideo(
-                                media=media_item['media'],
-                                caption=caption_text if i == 0 else None,
-                                parse_mode=ParseMode.HTML if caption_text else None
-                            )
-                        elif media_item['type'] == 'document':
-                            media = InputMediaDocument(
-                                media=media_item['media'],
-                                caption=caption_text if i == 0 else None,
-                                parse_mode=ParseMode.HTML if caption_text else None
-                            )
-                        telegram_media.append(media)
-                    
-                    if for_channel and self.use_user_account and self.user_app:
+                # Use user account for all channel messages
+                if use_user_account:
+                    if media_group and len(media_group) > 1:
                         success = await self.send_via_user_account(
                             chat_id, None, None, None, None, media_group, context
                         )
                         if success:
                             return True
                         else:
-                            if for_channel:
-                                logging.warning("⚠️ User account failed, skipping bot fallback for channel")
-                                return False
-                            logging.warning("⚠️ User account failed, using bot fallback")
-                    
-                    result = await context.bot.send_media_group(
-                        chat_id=chat_id,
-                        media=telegram_media
-                    )
-                    logging.info(f"✅ Media group sent to {chat_id}")
-                    return result
-                    
-                elif media_type and media_file:
-                    if caption:
-                        if for_channel and self.use_user_account:
+                            logging.warning(f"⚠️ User account failed for {chat_id}, attempt {attempt + 1}")
+                            
+                    elif media_type and media_file:
+                        if caption:
                             caption = self.format_with_emojis(caption, for_channel=True)
-                        else:
-                            caption = self.format_with_emojis(caption, for_channel=False)
-                    
-                    if for_channel and self.use_user_account and self.user_app:
+                        
                         success = await self.send_via_user_account(
                             chat_id, None, media_type, media_file, caption, None, context
                         )
                         if success:
                             return True
                         else:
-                            if for_channel:
-                                logging.warning("⚠️ User account failed, skipping bot fallback for channel")
-                                return False
-                            logging.warning("⚠️ User account failed, using bot fallback")
-                    
-                    if media_type == 'photo':
-                        result = await context.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=media_file,
-                            caption=caption,
-                            parse_mode=ParseMode.HTML if caption else None
-                        )
-                    elif media_type == 'video':
-                        result = await context.bot.send_video(
-                            chat_id=chat_id,
-                            video=media_file,
-                            caption=caption,
-                            parse_mode=ParseMode.HTML if caption else None
-                        )
-                    elif media_type == 'document':
-                        result = await context.bot.send_document(
-                            chat_id=chat_id,
-                            document=media_file,
-                            caption=caption,
-                            parse_mode=ParseMode.HTML if caption else None
-                        )
-                    elif media_type == 'animation':
-                        result = await context.bot.send_animation(
-                            chat_id=chat_id,
-                            animation=media_file,
-                            caption=caption,
-                            parse_mode=ParseMode.HTML if caption else None
-                        )
-                    logging.info(f"✅ Media sent to {chat_id}")
-                    return result
-                    
-                else:
-                    if not text or not text.strip():
-                        logging.error("❌ Text is empty!")
-                        return False
-                    
-                    final_text = text
-                    if for_channel and self.use_user_account:
-                        final_text = self.format_with_emojis(text, for_channel=True)
+                            logging.warning(f"⚠️ User account failed for {chat_id}, attempt {attempt + 1}")
+                            
                     else:
-                        final_text = self.format_with_emojis(text, for_channel=False)
-                    
-                    if for_channel and self.use_user_account and self.user_app:
+                        if not text or not text.strip():
+                            logging.error("❌ Text is empty!")
+                            return False
+                        
+                        final_text = self.format_with_emojis(text, for_channel=True)
+                        
                         success = await self.send_via_user_account(
                             chat_id, final_text, None, None, None, None, context
                         )
                         if success:
                             return True
                         else:
-                            if for_channel:
-                                logging.warning("⚠️ User account failed, skipping bot fallback for channel")
-                                return False
-                            logging.warning("⚠️ User account failed, using bot fallback")
-                    
-                    import re
-                    clean_text = re.sub(r'<emoji id=\d+>([^<]+)</emoji>', r'\1', final_text)
-                    
-                    if not clean_text or not clean_text.strip():
-                        logging.error("❌ Clean text is empty!")
-                        return False
-                    
-                    result = await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=clean_text,
-                        parse_mode=None
-                    )
-                    logging.info(f"✅ Text message sent to {chat_id}")
-                    return result
+                            logging.warning(f"⚠️ User account failed for {chat_id}, attempt {attempt + 1}")
+                
+                # Fallback to bot for non-channel messages or if user account fails
+                else:
+                    if media_group and len(media_group) > 1:
+                        logging.info(f"📸 Sending media group with {len(media_group)} items via bot to {chat_id}")
+                        
+                        telegram_media = []
+                        for i, media_item in enumerate(media_group):
+                            caption_text = media_item.get('caption', '')
+                            
+                            if caption_text:
+                                caption_text = self.format_with_emojis(caption_text, for_channel=False)
+                            
+                            if media_item['type'] == 'photo':
+                                media = InputMediaPhoto(
+                                    media=media_item['media'],
+                                    caption=caption_text if i == 0 else None,
+                                    parse_mode=ParseMode.HTML if caption_text else None
+                                )
+                            elif media_item['type'] == 'video':
+                                media = InputMediaVideo(
+                                    media=media_item['media'],
+                                    caption=caption_text if i == 0 else None,
+                                    parse_mode=ParseMode.HTML if caption_text else None
+                                )
+                            elif media_item['type'] == 'document':
+                                media = InputMediaDocument(
+                                    media=media_item['media'],
+                                    caption=caption_text if i == 0 else None,
+                                    parse_mode=ParseMode.HTML if caption_text else None
+                                )
+                            telegram_media.append(media)
+                        
+                        result = await context.bot.send_media_group(
+                            chat_id=chat_id,
+                            media=telegram_media
+                        )
+                        logging.info(f"✅ Media group sent to {chat_id}")
+                        return result
+                        
+                    elif media_type and media_file:
+                        if caption:
+                            caption = self.format_with_emojis(caption, for_channel=False)
+                        
+                        if media_type == 'photo':
+                            result = await context.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=media_file,
+                                caption=caption,
+                                parse_mode=ParseMode.HTML if caption else None
+                            )
+                        elif media_type == 'video':
+                            result = await context.bot.send_video(
+                                chat_id=chat_id,
+                                video=media_file,
+                                caption=caption,
+                                parse_mode=ParseMode.HTML if caption else None
+                            )
+                        elif media_type == 'document':
+                            result = await context.bot.send_document(
+                                chat_id=chat_id,
+                                document=media_file,
+                                caption=caption,
+                                parse_mode=ParseMode.HTML if caption else None
+                            )
+                        elif media_type == 'animation':
+                            result = await context.bot.send_animation(
+                                chat_id=chat_id,
+                                animation=media_file,
+                                caption=caption,
+                                parse_mode=ParseMode.HTML if caption else None
+                            )
+                        logging.info(f"✅ Media sent to {chat_id}")
+                        return result
+                        
+                    else:
+                        if not text or not text.strip():
+                            logging.error("❌ Text is empty!")
+                            return False
+                        
+                        final_text = self.format_with_emojis(text, for_channel=False)
+                        
+                        # Clean HTML tags for regular bot
+                        clean_text = re.sub(r'<emoji id=\d+>([^<]+)</emoji>', r'\1', final_text)
+                        
+                        if not clean_text or not clean_text.strip():
+                            logging.error("❌ Clean text is empty!")
+                            return False
+                        
+                        result = await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=clean_text,
+                            parse_mode=None
+                        )
+                        logging.info(f"✅ Text message sent to {chat_id}")
+                        return result
                 
             except NetworkError as e:
                 logging.warning(f"⚠️ Network error on attempt {attempt + 1}/{max_retries}: {e}")
@@ -1440,7 +1409,7 @@ class WinGoBotEnhanced:
         return False
 
     def load_config(self):
-        """Load configuration with channel-specific settings"""
+        """Load configuration from MongoDB"""
         default_config = {
             "admin_ids": [6484788124],
             "channels": [],
@@ -1452,73 +1421,68 @@ class WinGoBotEnhanced:
         }
         
         try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    loaded_config = json.load(f)
-                    self.config = {**default_config, **loaded_config}
-                
-                self.active_channels = self.config.get('channels', [])
-                self.channel_configs = self.config.get('channel_configs', {})
-                self.channel_prediction_status = self.config.get('channel_prediction_status', {})
-                self.custom_break_messages = self.config.get('custom_break_messages', {})
-                self.custom_break_schedules = self.config.get('custom_break_schedules', {})
-                
-                # Ensure all channel configs have templates and prediction status
-                for channel_id, config in self.channel_configs.items():
-                    if 'templates' not in config:
-                        config['templates'] = self.default_templates.copy()
-                    if 'show_links' not in config:
-                        config['show_links'] = True
-                    if 'show_promo' not in config:
-                        config['show_promo'] = True
-                    # Initialize prediction status if not exists
-                    if channel_id not in self.channel_prediction_status:
-                        self.channel_prediction_status[channel_id] = True
-                
-                logging.info(f"✅ Configuration loaded. Active channels: {len(self.active_channels)}")
-                logging.info(f"✅ Channel prediction status loaded for {len(self.channel_prediction_status)} channels")
-                
-                # Fix custom_break_messages structure
-                for channel_id, messages in self.custom_break_messages.items():
-                    if isinstance(messages, dict):
-                        self.custom_break_messages[channel_id] = [messages]
-                    elif not isinstance(messages, list):
-                        self.custom_break_messages[channel_id] = []
-                
-                total_msgs = sum(len(msgs) for msgs in self.custom_break_messages.values() if isinstance(msgs, list))
-                logging.info(f"✅ Custom break messages: {total_msgs} across {len(self.custom_break_messages)} channels")
-                
+            doc = self.mongo.meta.find_one({'_id': 'wingo_config'})
+            if doc and 'data' in doc:
+                loaded_config = doc['data']
+                self.config = {**default_config, **loaded_config}
             else:
                 self.config = default_config
-                self.active_channels = []
-                self.channel_configs = {}
-                self.channel_prediction_status = {}
-                self.custom_break_messages = {}
-                self.custom_break_schedules = {}
-                self.save_config()
-                logging.info("✅ Created new config file")
+            
+            self.active_channels = self.config.get('channels', [])
+            self.channel_configs = self.config.get('channel_configs', {})
+            self.channel_prediction_status = self.config.get('channel_prediction_status', {})
+            self.custom_break_messages = self.config.get('custom_break_messages', {})
+            self.custom_break_schedules = self.config.get('custom_break_schedules', {})
+            
+            self.active_channels = [c for c in self.active_channels if c and str(c).strip()]
+            
+            for channel_id, config in self.channel_configs.items():
+                if 'templates' not in config:
+                    config['templates'] = self.default_templates.copy()
+                if 'show_links' not in config:
+                    config['show_links'] = True
+                if 'show_promo' not in config:
+                    config['show_promo'] = True
+                if channel_id not in self.channel_prediction_status:
+                    self.channel_prediction_status[channel_id] = True
+            
+            for channel_id, messages in self.custom_break_messages.items():
+                if isinstance(messages, dict):
+                    self.custom_break_messages[channel_id] = [messages]
+                elif not isinstance(messages, list):
+                    self.custom_break_messages[channel_id] = []
+            
+            total_msgs = sum(len(msgs) for msgs in self.custom_break_messages.values() if isinstance(msgs, list))
+            logging.info(f"✅ Configuration loaded from MongoDB. Active channels: {len(self.active_channels)}")
+            logging.info(f"✅ Channel prediction status loaded for {len(self.channel_prediction_status)} channels")
+            logging.info(f"✅ Custom break messages: {total_msgs} across {len(self.custom_break_messages)} channels")
+            
         except Exception as e:
-            logging.error(f"❌ Error loading config: {e}")
+            logging.error(f"❌ Error loading config from MongoDB: {e}")
             self.config = default_config
             self.active_channels = []
             self.channel_configs = {}
             self.channel_prediction_status = {}
             self.custom_break_messages = {}
             self.custom_break_schedules = {}
-            self.save_config()
 
     def save_config(self):
-        """Save configuration"""
+        """Save configuration to MongoDB"""
         try:
             self.config['channels'] = self.active_channels
             self.config['channel_configs'] = self.channel_configs
             self.config['channel_prediction_status'] = self.channel_prediction_status
             self.config['custom_break_messages'] = self.custom_break_messages
             self.config['custom_break_schedules'] = self.custom_break_schedules
-            self.mongo.meta.update_one({'_id':'wingo_config'},{'$set':{'data':self.config}},upsert=True)
-            logging.info(f"✅ Configuration saved. Active channels: {len(self.active_channels)}")
+            
+            self.mongo.meta.update_one(
+                {'_id': 'wingo_config'},
+                {'$set': {'data': self.config, 'updated_at': datetime.utcnow()}},
+                upsert=True
+            )
+            logging.info(f"✅ Configuration saved to MongoDB. Active channels: {len(self.active_channels)}")
         except Exception as e:
-            logging.error(f"❌ Error saving config: {e}")
+            logging.error(f"❌ Error saving config to MongoDB: {e}")
 
     def get_channel_config(self, channel_id):
         """Get channel-specific config or create default"""
@@ -1822,12 +1786,11 @@ class WinGoBotEnhanced:
                             except Exception as e:
                                 continue
                         
-                        # Update history tracking for AI
                         for item in formatted_data[:20]:
                             self.pattern_memory.append({
                                 'result': item['big_small'],
                                 'number': item['number'],
-                                'timestamp': datetime.now()
+                                'timestamp': datetime.utcnow()
                             })
                             self.number_memory.append(item['number'])
                             self.recent_results.append(item['big_small'])
@@ -1850,7 +1813,6 @@ class WinGoBotEnhanced:
         if len(results) < 10:
             return patterns
         
-        # Current streak analysis
         current_streak = 1
         current_type = results[0]
         for i in range(1, len(results)):
@@ -1861,7 +1823,6 @@ class WinGoBotEnhanced:
         patterns['current_streak'] = current_streak
         patterns['streak_type'] = current_type
         
-        # Balance analysis
         last_20_results = results[:20]
         big_count_20 = last_20_results.count('BIG')
         small_count_20 = last_20_results.count('SMALL')
@@ -1870,7 +1831,6 @@ class WinGoBotEnhanced:
         patterns['small_20'] = small_count_20
         patterns['imbalance_20'] = big_count_20 - small_count_20
         
-        # Gap analysis
         gap_big = 0
         gap_small = 0
         for i, r in enumerate(results[:10]):
@@ -1890,7 +1850,6 @@ class WinGoBotEnhanced:
         patterns['gap_big'] = gap_big
         patterns['gap_small'] = gap_small
         
-        # Number pattern analysis
         if numbers and len(numbers) >= 15:
             recent_numbers = numbers[:15]
             big_nums = sum(1 for n in recent_numbers if n >= 5)
@@ -1899,7 +1858,6 @@ class WinGoBotEnhanced:
             patterns['small_nums_15'] = small_nums
             patterns['number_imbalance'] = big_nums - small_nums
             
-            # Hot/Cold number analysis
             number_counter = Counter(recent_numbers)
             hot_numbers = [num for num, count in number_counter.items() if count >= 2]
             cold_numbers = [num for num in range(10) if num not in recent_numbers[-5:]]
@@ -1909,20 +1867,17 @@ class WinGoBotEnhanced:
             patterns['hot_big'] = sum(1 for n in hot_numbers if n >= 5)
             patterns['hot_small'] = sum(1 for n in hot_numbers if n <= 4)
             
-            # Recent number trend
             recent_5 = numbers[:5]
             recent_trend_big = sum(1 for n in recent_5 if n >= 5)
             recent_trend_small = sum(1 for n in recent_5 if n <= 4)
             patterns['recent_trend'] = 'BIG' if recent_trend_big > recent_trend_small else 'SMALL'
         
-        # Alternating pattern
         alternating_score = 0
         for i in range(2, min(10, len(results))):
             if results[i] != results[i-1]:
                 alternating_score += 1
-        patterns['alternating_score'] = alternating_score / 8.0
+        patterns['alternating_score'] = alternating_score / 8.0 if len(results) >= 8 else 0
         
-        # Check for consecutive same results
         consecutive_same = 0
         last_result = results[0]
         for result in results[:8]:
@@ -1938,7 +1893,6 @@ class WinGoBotEnhanced:
         """Calculate multiple winning strategies with better logic"""
         strategies = []
         
-        # Strategy 1: Streak breaker (but with limit)
         if patterns.get('current_streak', 0) >= 2:
             if patterns['current_streak'] >= 3:
                 prediction = 'BIG' if patterns['streak_type'] == 'SMALL' else 'SMALL'
@@ -1954,7 +1908,6 @@ class WinGoBotEnhanced:
                     confidence = 70
                     strategies.append(('streak_breaker_short', prediction, confidence))
         
-        # Strategy 2: Balance correction
         imbalance = patterns.get('imbalance_20', 0)
         if abs(imbalance) >= 3:
             if imbalance > 0:
@@ -1965,7 +1918,6 @@ class WinGoBotEnhanced:
                 confidence = min(85, 70 + abs(imbalance) * 3)
             strategies.append(('balance_correction', prediction, confidence))
         
-        # Strategy 3: Gap filling
         gap_diff = patterns.get('gap_big', 0) - patterns.get('gap_small', 0)
         if abs(gap_diff) >= 3:
             if gap_diff > 0:
@@ -1976,7 +1928,6 @@ class WinGoBotEnhanced:
                 confidence = 75 + min(15, abs(gap_diff) * 3)
             strategies.append(('gap_filling', prediction, confidence))
         
-        # Strategy 4: Number pattern
         number_imbalance = patterns.get('number_imbalance', 0)
         if abs(number_imbalance) >= 4:
             if number_imbalance > 0:
@@ -1987,7 +1938,6 @@ class WinGoBotEnhanced:
                 confidence = 70 + min(20, abs(number_imbalance) * 2)
             strategies.append(('number_pattern_correction', prediction, confidence))
         
-        # Strategy 5: Recent trend
         if 'recent_trend' in patterns:
             recent_trend = patterns['recent_trend']
             if patterns.get('consecutive_same', 0) < 3:
@@ -1995,13 +1945,11 @@ class WinGoBotEnhanced:
                 confidence = 65
                 strategies.append(('trend_following', prediction, confidence))
         
-        # Strategy 6: Random walk
         if random.random() < 0.2:
             prediction = random.choice(['BIG', 'SMALL'])
             confidence = 55
             strategies.append(('random_walk', prediction, confidence))
         
-        # Strategy 7: Hot number analysis
         if patterns.get('hot_big', 0) > patterns.get('hot_small', 0) + 2:
             prediction = 'BIG'
             confidence = 70
@@ -2011,7 +1959,6 @@ class WinGoBotEnhanced:
             confidence = 70
             strategies.append(('hot_number_small', prediction, confidence))
         
-        # Strategy 8: Alternating pattern
         if patterns.get('alternating_score', 0) > 0.7:
             last_result = self.last_actual_results[0] if self.last_actual_results else None
             if last_result:
@@ -2041,7 +1988,6 @@ class WinGoBotEnhanced:
             else:
                 small_score += score
         
-        # Safety check
         if self.consecutive_losses >= 2:
             logging.info(f"🛡️ Safety mode active: {self.consecutive_losses} consecutive losses")
             if self.consecutive_losses >= 3:
@@ -2050,7 +1996,6 @@ class WinGoBotEnhanced:
                 else:
                     return 'BIG', min(80, big_score + 20)
         
-        # Normal decision
         if big_score > small_score:
             final_confidence = min(95, big_score)
             return 'BIG', final_confidence
@@ -2059,7 +2004,7 @@ class WinGoBotEnhanced:
             return 'SMALL', final_confidence
 
     def analyze_pattern_advanced(self, data_list):
-        """NEW: Use AI for pattern analysis"""
+        """Use AI for pattern analysis"""
         return self.analyze_pattern_with_ai(data_list)
 
     def get_next_period(self, current_period):
@@ -2156,9 +2101,8 @@ class WinGoBotEnhanced:
                     logging.info(f"⏸️ Predictions paused for channel {channel}")
                     continue
                 
-                use_premium = for_channel and self.use_user_account
-                
-                message_text = self.format_session_message(channel, for_channel=use_premium)
+                # Always use premium emojis for channel messages via user account
+                message_text = self.format_session_message(channel, for_channel=True)
                 
                 if not message_text or not message_text.strip():
                     logging.error(f"❌ Message text is empty for channel {channel}")
@@ -2168,7 +2112,7 @@ class WinGoBotEnhanced:
                     context=context,
                     chat_id=channel,
                     text=message_text,
-                    for_channel=use_premium
+                    for_channel=True  # Always True for channel messages
                 )
                 
                 if result:
@@ -2208,25 +2152,26 @@ class WinGoBotEnhanced:
                             self.session_predictions[i] = f"{period_short} {choice_text}"
                         break
                 
-                # NEW: AI Learning from result
                 results = [item['big_small'] for item in data[:20]]
                 numbers = [item['number'] for item in data[:20]]
                 
-                # Calculate pattern hash for learning
                 result_numeric = [1 if r == 'BIG' else 0 for r in results[:self.pattern_window_size]]
                 if len(result_numeric) >= self.pattern_window_size:
                     pattern_hash = self.calculate_pattern_hash(result_numeric)
-                    
-                    # Learn from this pattern
                     self.learn_from_pattern(pattern_hash, self.current_prediction_choice, is_win)
-                    
-                    # Update AI statistics
                     self.ai_prediction_history.append({
                         'prediction': self.current_prediction_choice,
                         'result': result,
                         'was_correct': is_win,
                         'pattern_hash': pattern_hash,
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.utcnow()
+                    })
+                    self.mongo.ai_predictions.insert_one({
+                        'prediction': self.current_prediction_choice,
+                        'result': result,
+                        'was_correct': is_win,
+                        'pattern_hash': pattern_hash,
+                        'timestamp': datetime.utcnow()
                     })
                 
                 if is_win:
@@ -2258,7 +2203,6 @@ class WinGoBotEnhanced:
             latest_period = latest.get('issueNumber')
             next_period = self.get_next_period(latest_period)
             
-            # NEW: Use AI enhanced prediction
             choice, confidence = self.analyze_pattern_advanced(data)
             
             period_short = next_period[-2:] if len(next_period) >= 2 else next_period
@@ -2292,7 +2236,6 @@ class WinGoBotEnhanced:
         latest_period = latest.get('issueNumber')
         next_period = self.get_next_period(latest_period)
         
-        # NEW: Use AI enhanced prediction
         choice, confidence = self.analyze_pattern_advanced(data)
         
         period_short = next_period[-2:] if len(next_period) >= 2 else next_period
@@ -2628,8 +2571,6 @@ class WinGoBotEnhanced:
             media_items = message_data.get('media_items', [])
             text_content = message_data.get('text_content', '')
             
-            use_user_account = self.use_user_account
-            
             if text_content:
                 text_content = self.format_custom_message_with_premium_emojis(text_content, channel_id)
                 logging.info(f"✅ Formatted text: {text_content[:100]}...")
@@ -2653,7 +2594,7 @@ class WinGoBotEnhanced:
                 result = await self.send_message_with_retry(
                     context=context,
                     chat_id=channel_id,
-                    for_channel=use_user_account,
+                    for_channel=True,
                     media_group=formatted_media_group
                 )
                 
@@ -2667,7 +2608,7 @@ class WinGoBotEnhanced:
                     context=context,
                     chat_id=channel_id,
                     text=text_content,
-                    for_channel=use_user_account
+                    for_channel=True
                 )
                 
                 if result:
@@ -2682,9 +2623,8 @@ class WinGoBotEnhanced:
             logging.error(f"❌ Error sending custom break message {message_index+1} to {channel_id}: {e}")
 
     def get_keyboard(self, keyboard_type, channel_id=None, message_index=None):
-        """Get keyboard with NEW: AI Statistics display"""
+        """Get keyboard with AI Statistics display"""
         
-        # Main menu - with AI statistics
         main_menu = [
             [InlineKeyboardButton("📊 Stats & AI", callback_data="stats")],
             [InlineKeyboardButton("⚙️ Channel Settings", callback_data="select_channel_config")],
@@ -2696,7 +2636,6 @@ class WinGoBotEnhanced:
             [InlineKeyboardButton("🔄 Advanced", callback_data="advanced")]
         ]
         
-        # NEW: AI Management Menu
         if keyboard_type == 'ai_management':
             ai_menu = [
                 [InlineKeyboardButton("📈 AI Statistics", callback_data="ai_stats")],
@@ -2708,7 +2647,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(ai_menu)
         
-        # Prediction control menu
         if keyboard_type == 'prediction_control':
             if not self.active_channels:
                 return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]])
@@ -2723,7 +2661,6 @@ class WinGoBotEnhanced:
             buttons.append([InlineKeyboardButton("🔙 Back to Main", callback_data="main_menu")])
             return InlineKeyboardMarkup(buttons)
         
-        # Channel configuration menu
         if keyboard_type == 'channel_config' and channel_id:
             channel_status = self.is_channel_prediction_active(channel_id)
             status_text = "⏸️ Pause Predictions" if channel_status else "▶️ Start Predictions"
@@ -2739,7 +2676,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(channel_config_menu)
         
-        # Custom break menu
         elif keyboard_type == 'custom_break_menu':
             custom_break_menu = [
                 [InlineKeyboardButton("📋 Manage by Channel", callback_data="select_channel_custom_break")],
@@ -2749,7 +2685,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(custom_break_menu)
         
-        # Custom break setup menu
         elif keyboard_type == 'custom_break_setup' and channel_id:
             channel_config = self.get_channel_config(channel_id)
             custom_break_status = "✅ Enabled" if channel_config.get('custom_break_enabled', False) else "❌ Disabled"
@@ -2769,7 +2704,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(custom_break_setup_menu)
         
-        # Select message to edit
         elif keyboard_type == 'select_message_edit' and channel_id:
             messages = self.get_custom_break_messages(channel_id)
             buttons = []
@@ -2781,7 +2715,6 @@ class WinGoBotEnhanced:
             buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"custom_break_setup:{channel_id}")])
             return InlineKeyboardMarkup(buttons)
         
-        # Select message to delete
         elif keyboard_type == 'select_message_delete' and channel_id:
             messages = self.get_custom_break_messages(channel_id)
             buttons = []
@@ -2793,7 +2726,6 @@ class WinGoBotEnhanced:
             buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"custom_break_setup:{channel_id}")])
             return InlineKeyboardMarkup(buttons)
         
-        # Message editing menu
         elif keyboard_type == 'edit_message' and channel_id and message_index is not None:
             message_data = self.get_custom_break_message_by_index(channel_id, message_index)
             if not message_data:
@@ -2810,7 +2742,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(edit_message_menu)
         
-        # Links setup menu
         elif keyboard_type == 'links_setup' and channel_id:
             links_menu = [
                 [InlineKeyboardButton("✏️ Change Register Link", callback_data=f"change_register_link:{channel_id}")],
@@ -2819,7 +2750,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(links_menu)
         
-        # Templates setup menu
         elif keyboard_type == 'templates_setup' and channel_id:
             templates_menu = [
                 [InlineKeyboardButton("📄 Prediction Template", callback_data=f"edit_prediction_template:{channel_id}")],
@@ -2831,7 +2761,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(templates_menu)
         
-        # Toggle features menu
         elif keyboard_type == 'toggle_features' and channel_id:
             channel_config = self.get_channel_config(channel_id)
             
@@ -2845,7 +2774,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(toggle_menu)
         
-        # Advanced menu
         elif keyboard_type == 'advanced':
             advanced_menu = [
                 [InlineKeyboardButton("🔄 Reset Session", callback_data="reset_table")],
@@ -2855,7 +2783,6 @@ class WinGoBotEnhanced:
             ]
             return InlineKeyboardMarkup(advanced_menu)
         
-        # Channel selection menu
         elif keyboard_type == 'select_channel':
             if not self.active_channels:
                 return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]])
@@ -2866,7 +2793,6 @@ class WinGoBotEnhanced:
             buttons.append([InlineKeyboardButton("🔙 Back", callback_data="main_menu")])
             return InlineKeyboardMarkup(buttons)
         
-        # Custom break channel selection
         elif keyboard_type == 'select_channel_custom_break':
             if not self.active_channels:
                 return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="custom_break_menu")]])
@@ -2880,7 +2806,6 @@ class WinGoBotEnhanced:
             buttons.append([InlineKeyboardButton("🔙 Back", callback_data="custom_break_menu")])
             return InlineKeyboardMarkup(buttons)
         
-        # Remove channel menu
         elif keyboard_type == 'remove_channel':
             if not self.active_channels:
                 return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]])
@@ -2891,7 +2816,6 @@ class WinGoBotEnhanced:
             buttons.append([InlineKeyboardButton("🔙 Back", callback_data="main_menu")])
             return InlineKeyboardMarkup(buttons)
         
-        # Default main menu
         return InlineKeyboardMarkup(main_menu)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2949,7 +2873,6 @@ class WinGoBotEnhanced:
                 current_session, is_active_period, current_hour, current_minute, next_session = self.get_current_session()
                 is_operational = self.is_operational_time(current_hour, current_minute)
                 
-                # Count active channels
                 active_channels = [c for c in self.active_channels if self.is_channel_prediction_active(c)]
                 paused_channels = [c for c in self.active_channels if not self.is_channel_prediction_active(c)]
                 
@@ -2986,7 +2909,6 @@ class WinGoBotEnhanced:
                 
                 await query.edit_message_text(stats_text, reply_markup=self.get_keyboard('main'))
                 
-            # NEW: AI Management
             elif data == 'ai_management':
                 await query.edit_message_text(
                     "🤖 AI Pattern Recognition Management\n\n"
@@ -3038,7 +2960,6 @@ class WinGoBotEnhanced:
                 
                 patterns_text = "🔍 TOP WINNING PATTERNS:\n\n"
                 
-                # Get top 10 patterns by success rate
                 sorted_patterns = sorted(
                     self.pattern_database.items(),
                     key=lambda x: x[1].get('success_rate', 0),
@@ -3051,7 +2972,7 @@ class WinGoBotEnhanced:
                     last_seen = pattern_data.get('last_seen', 'Never')
                     
                     patterns_text += f"{i+1}. Success: {success_rate:.1f}% ({occurrences} times)\n"
-                    patterns_text += f"   Last Seen: {last_seen[:16]}\n"
+                    patterns_text += f"   Last Seen: {last_seen[:16] if len(last_seen) > 16 else last_seen}\n"
                     patterns_text += f"   Hash: {pattern_hash[:8]}...\n\n"
                 
                 patterns_text += f"Total Patterns: {len(self.pattern_database)}"
@@ -3092,6 +3013,9 @@ class WinGoBotEnhanced:
                 self.pattern_history = []
                 self.ai_prediction_history.clear()
                 
+                self.mongo.pattern_history.delete_many({})
+                self.mongo.ai_predictions.delete_many({})
+                
                 self.save_ai_model()
                 
                 await query.edit_message_text(
@@ -3114,7 +3038,6 @@ class WinGoBotEnhanced:
                 total = len(recent_history)
                 recent_accuracy = (correct / total * 100) if total > 0 else 0
                 
-                # Pattern type analysis
                 pattern_types_count = Counter()
                 for pattern_data in self.pattern_database.values():
                     pattern_str = pattern_data.get('pattern', '')
@@ -3904,7 +3827,7 @@ Use the templates menu to edit any of these."""
                 await query.edit_message_text(
                     "➕ Add New Channel\n\n"
                     "Send channel username (@mychannel) or numeric ID (-1001234567890):\n\n"
-                    "For user account: Bot/User must be member",
+                    "User account must be a member of the channel to send messages!",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="main_menu")]])
                 )
                 
@@ -4032,12 +3955,7 @@ Use the templates menu to edit any of these."""
             if text.startswith('@') or (text.lstrip('-').isdigit()):
                 if text not in self.active_channels:
                     try:
-                        await self.send_message_with_retry(
-                            context=context,
-                            chat_id=text,
-                            text="🤖 Bot connectivity test"
-                        )
-                        
+                        # Don't check bot membership since we're using user account
                         self.active_channels.append(text)
                         self.channel_prediction_status[text] = True
                         self.save_config()
@@ -4045,7 +3963,7 @@ Use the templates menu to edit any of these."""
                         if self.use_user_account and self.user_app:
                             await self.resolve_all_channels()
                         
-                        await message.reply_text(f"✅ Channel {text} added successfully!")
+                        await message.reply_text(f"✅ Channel {text} added successfully!\n\nNote: User account must be a member of this channel to send messages.")
                         logging.info(f"✅ Channel added: {text}")
                         
                     except Exception as e:
@@ -4368,14 +4286,14 @@ Use the templates menu to edit any of these."""
             del self.user_state[chat_id]
             
         elif state.startswith('awaiting_promo_text:') and text:
-            channel_id = data.split(':', 1)[1]
+            channel_id = state.split(':', 1)[1]
             converted_text = self.auto_detect_and_convert_message(text)
             self.update_channel_config(channel_id, {'promotional_text': converted_text})
             await message.reply_text(f"✅ Promotional text updated for {channel_id}!\n🎯 Emojis were auto-converted.")
             del self.user_state[chat_id]
             
         elif state.startswith('awaiting_prediction_template:') and text:
-            channel_id = data.split(':', 1)[1]
+            channel_id = state.split(':', 1)[1]
             converted_text = self.auto_detect_and_convert_message(text)
             self.update_channel_config(channel_id, {
                 'templates': {'prediction_header': converted_text}
@@ -4384,7 +4302,7 @@ Use the templates menu to edit any of these."""
             del self.user_state[chat_id]
             
         elif state.startswith('awaiting_morning_template:') and text:
-            channel_id = data.split(':', 1)[1]
+            channel_id = state.split(':', 1)[1]
             converted_text = self.auto_detect_and_convert_message(text)
             self.update_channel_config(channel_id, {
                 'templates': {'good_morning': converted_text}
@@ -4393,7 +4311,7 @@ Use the templates menu to edit any of these."""
             del self.user_state[chat_id]
             
         elif state.startswith('awaiting_night_template:') and text:
-            channel_id = data.split(':', 1)[1]
+            channel_id = state.split(':', 1)[1]
             converted_text = self.auto_detect_and_convert_message(text)
             self.update_channel_config(channel_id, {
                 'templates': {'good_night': converted_text}
@@ -4402,7 +4320,7 @@ Use the templates menu to edit any of these."""
             del self.user_state[chat_id]
             
         elif state.startswith('awaiting_break_template:') and text:
-            channel_id = data.split(':', 1)[1]
+            channel_id = state.split(':', 1)[1]
             converted_text = self.auto_detect_and_convert_message(text)
             self.update_channel_config(channel_id, {
                 'templates': {'break_message': converted_text}
@@ -4535,7 +4453,6 @@ Use the templates menu to edit any of these."""
                         await asyncio.sleep(10)
                         continue
                     
-                    # Check if ANY channel has active predictions
                     active_channel_count = len([c for c in self.active_channels if self.is_channel_prediction_active(c)])
                     
                     if active_channel_count == 0:
@@ -4543,14 +4460,12 @@ Use the templates menu to edit any of these."""
                         await asyncio.sleep(30)
                         continue
                     
-                    # NORMAL ACTIVE PERIOD
                     if is_active_period and not self.session_ended and not self.in_break_period:
                         if self.waiting_for_result:
                             await self.check_result_and_send_next(context, data)
                         else:
                             await self.send_first_prediction(context, data)
                     
-                    # BREAK PERIOD BUT WAITING FOR WIN
                     elif not is_active_period and self.waiting_for_win and not self.in_break_period:
                         logging.info("🎯 Break period - Continuing for WIN")
                         if self.waiting_for_result:
@@ -4574,12 +4489,10 @@ Use the templates menu to edit any of these."""
                         else:
                             await self.send_first_prediction(context, data)
                     
-                    # NORMAL BREAK PERIOD
                     elif not is_active_period and self.in_break_period:
                         logging.info("⏸️ In break period - Waiting")
                         await asyncio.sleep(30)
                 
-                # Periodically save AI model
                 if self.ai_total_predictions % 25 == 0 and self.ai_total_predictions > 0:
                     self.save_ai_model()
                 
@@ -4612,6 +4525,8 @@ Use the templates menu to edit any of these."""
         logging.info("📎 SUPPORT: ANY File Type (APK, PDF, HTML, EXE, ZIP, etc.)")
         logging.info("🎯 CONTROL: Start/Pause predictions for each channel individually")
         logging.info("⚡ AI: Auto-saves and retrains periodically")
+        logging.info("💾 MongoDB: All data stored in MongoDB")
+        logging.info("👤 User Account: Sending all channel messages via user account for premium emojis")
         
         application.run_polling()
 
