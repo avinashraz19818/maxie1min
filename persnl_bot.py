@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import json
+from pymongo import MongoClient
 import aiohttp
 import os
 import random
@@ -30,6 +31,9 @@ from pyrogram.types import InputMediaPhoto as PyrogramInputMediaPhoto
 from pyrogram.types import InputMediaVideo as PyrogramInputMediaVideo
 from pyrogram.types import InputMediaDocument as PyrogramInputMediaDocument
 
+MONGO_URI = "mongodb+srv://avinash:avinash12@cluster0.wnwd1fv.mongodb.net/?appName=Cluster0"
+MONGO_DB_NAME = "maxie1min"
+
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -42,6 +46,8 @@ class WinGoBotEnhanced:
         self.config_file = 'wingo_config.json'
         self.templates_file = 'templates.json'
         self.emoji_config_file = 'emoji_config.json'
+        self.mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        self.mongo = self.mongo_client[MONGO_DB_NAME]
         self.ai_model_file = 'ai_pattern_model.pkl'  # NEW: AI model file
         self.pattern_history_file = 'pattern_history.json'  # NEW: Pattern history
 
@@ -845,8 +851,7 @@ class WinGoBotEnhanced:
     def save_emoji_config(self):
         """Save emoji configuration"""
         try:
-            with open(self.emoji_config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.emoji_config, f, indent=2, ensure_ascii=False)
+            self.mongo.meta.update_one({'_id':'emoji_config'},{'$set':{'data':self.emoji_config}},upsert=True)
             logging.info("✅ Emoji configuration saved")
         except Exception as e:
             logging.error(f"❌ Error saving emoji config: {e}")
@@ -1503,8 +1508,7 @@ class WinGoBotEnhanced:
             self.config['channel_prediction_status'] = self.channel_prediction_status
             self.config['custom_break_messages'] = self.custom_break_messages
             self.config['custom_break_schedules'] = self.custom_break_schedules
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=2, ensure_ascii=False)
+            self.mongo.meta.update_one({'_id':'wingo_config'},{'$set':{'data':self.config}},upsert=True)
             logging.info(f"✅ Configuration saved. Active channels: {len(self.active_channels)}")
         except Exception as e:
             logging.error(f"❌ Error saving config: {e}")
