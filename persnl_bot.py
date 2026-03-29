@@ -1274,7 +1274,7 @@ class WinGoBotEnhanced:
     async def send_message_with_retry(self, context: ContextTypes.DEFAULT_TYPE, chat_id, text=None, max_retries=3, for_channel=False, media_type=None, media_file=None, caption=None, media_group=None):
         """Send message with retry logic"""
         
-        if chat_id in self.failed_peers:
+        if chat_id in self.failed_peers and not (for_channel and self.use_user_account and self.user_app):
             for_channel = False
             logging.info(f"⚠️ Using bot for failed peer: {chat_id}")
         
@@ -1320,6 +1320,9 @@ class WinGoBotEnhanced:
                         if success:
                             return True
                         else:
+                            if for_channel:
+                                logging.warning("⚠️ User account failed, skipping bot fallback for channel")
+                                return False
                             logging.warning("⚠️ User account failed, using bot fallback")
                     
                     result = await context.bot.send_media_group(
@@ -1343,6 +1346,9 @@ class WinGoBotEnhanced:
                         if success:
                             return True
                         else:
+                            if for_channel:
+                                logging.warning("⚠️ User account failed, skipping bot fallback for channel")
+                                return False
                             logging.warning("⚠️ User account failed, using bot fallback")
                     
                     if media_type == 'photo':
@@ -1394,6 +1400,9 @@ class WinGoBotEnhanced:
                         if success:
                             return True
                         else:
+                            if for_channel:
+                                logging.warning("⚠️ User account failed, skipping bot fallback for channel")
+                                return False
                             logging.warning("⚠️ User account failed, using bot fallback")
                     
                     import re
