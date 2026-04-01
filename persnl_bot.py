@@ -1411,7 +1411,7 @@ class WinGoBotEnhanced:
     def load_config(self):
         """Load configuration from MongoDB"""
         default_config = {
-            "admin_ids": [6484788124],
+            "admin_ids": [6484788124, 6580753098, 6484788124],
             "channels": [],
             "channel_configs": {},
             "channel_prediction_status": {},
