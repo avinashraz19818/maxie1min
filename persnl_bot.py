@@ -175,7 +175,7 @@ class WinGoBotEnhanced:
             'cycle': 0
         }
 
-        # Default templates with ACTUAL EMOJIS
+        # Default templates with PLACEHOLDERS (store with placeholders, not emojis)
         self.default_templates = {
             "prediction_header": "{crown} 𝐁𝐃𝐆 𝐖𝐈𝐍 𝐖𝐈𝐍𝐆𝐎 𝐎𝐅𝐅𝐈𝐂𝐈𝐀𝐋 {crown}\n   ——————————————\n        {sparkles} 𝟭 𝗠𝗜𝗡  𝗪𝗜𝐍𝐆𝐎  {sparkles}\n    —————————————",
             "session_line": "      {check} 𝐒𝐄𝐒𝐒𝐈𝐎𝐍: {session}",
@@ -712,6 +712,7 @@ class WinGoBotEnhanced:
             "premium_emojis": {
                 "fire": "<emoji id=5420315771991497307>🔥</emoji>",
                 "crown": "<emoji id=6266995104687330978>👑</emoji>",
+                "viponly": "<emoji id=5399979673075597085>👑</emoji><emoji id=5399978161247108192>👑</emoji><emoji id=5400229043171768095>👑</emoji><emoji id=5399828803759388457>👑</emoji><emoji id=5399883182340324691>👑</emoji><emoji id=5400216055190665596>👑</emoji>",
                 "sparkles": "<emoji id=6285088169817805553>✨</emoji>",
                 "rocket": "<emoji id=5188481279963715781>🚀</emoji>",
                 "money": "<emoji id=6267068789146260253>💰</emoji>",
@@ -721,6 +722,9 @@ class WinGoBotEnhanced:
                 "gift": "<emoji id=5384578448633129482>🎁</emoji>",
                 "lightning": "<emoji id=6267107057304868214>⚡</emoji>",
                 "star": "<emoji id=5435957248314579621>⭐</emoji>",
+                "underline": "<emoji id=5217902162423592635>🟩</emoji><emoji id=5217629543669446971>🟩</emoji><emoji id=5217923740339288459>🟩</emoji><emoji id=5220086930682688906>🟩</emoji><emoji id=5217671372355940826>🟩</emoji><emoji id=5217725231245835160>🟩</emoji><emoji id=5217906831053041314>🟩</emoji><emoji id=5217961707850183947>🟩</emoji>",
+                "rosehand": "<emoji id=5363938656874673963>🌹</emoji>",
+                "live": "<emoji id=5264919878082509254>▶️</emoji> Live",
                 "warning": "<emoji id=6267039884016358504>⚠️</emoji>",
                 "check": "<emoji id=6267008582294705964>✅</emoji>",
                 "cross": "<emoji id=5343968063970632884>❌</emoji>",
@@ -739,6 +743,10 @@ class WinGoBotEnhanced:
             "regular_emojis": {
                 "fire": "🔥",
                 "crown": "👑",
+                "viponly": "👑👑👑👑👑👑",
+                "underline": "🟩🟩🟩🟩🟩🟩🟩🟩",
+                "rosehand": "🌹",
+                "live": "▶️ Live",
                 "sparkles": "✨",
                 "rocket": "🚀",
                 "money": "💰",
@@ -766,6 +774,10 @@ class WinGoBotEnhanced:
             "emoji_to_placeholder": {
                 "🔥": "{fire}",
                 "👑": "{crown}",
+                "🟩": "{underline}",
+                "🌹": "{rosehand}",
+                "▶️": "{live}",
+                "VIPONLY": "{viponly}",
                 "✨": "{sparkles}",
                 "🚀": "{rocket}",
                 "💰": "{money}",
@@ -793,6 +805,10 @@ class WinGoBotEnhanced:
             "placeholder_to_emoji": {
                 "{fire}": "🔥",
                 "{crown}": "👑",
+                "{viponly}": "👑👑👑👑👑👑",
+                "{underline}": "🟩🟩🟩🟩🟩🟩🟩🟩",
+                "{rosehand}": "🌹",
+                "{live}": "▶️ Live",
                 "{sparkles}": "✨",
                 "{rocket}": "🚀",
                 "{money}": "💰",
@@ -848,22 +864,8 @@ class WinGoBotEnhanced:
             logging.error(f"❌ Error saving emoji config to MongoDB: {e}")
 
     def get_emoji(self, emoji_key, for_channel=False):
-        """Get emoji"""
-        try:
-            if for_channel and self.use_user_account:
-                return self.emoji_config['premium_emojis'].get(emoji_key, self.emoji_config['regular_emojis'].get(emoji_key, ''))
-            else:
-                return self.emoji_config['regular_emojis'].get(emoji_key, '')
-        except KeyError:
-            regular_emojis = {
-                "fire": "🔥", "crown": "👑", "sparkles": "✨", "rocket": "🚀",
-                "money": "💰", "chart": "📊", "target": "🎯", "trophy": "🏆",
-                "gift": "🎁", "lightning": "⚡", "star": "⭐", "warning": "⚠️",
-                "check": "✅", "cross": "❌", "clock": "⏰", "link": "🔗",
-                "moon": "🌙", "sun": "🌅", "coffee": "☕", "sleep": "💤",
-                "break_icon": "⏸️", "reload": "🔄", "party": "🎉", "money_loss": "💸", "star2": "🌟"
-            }
-            return regular_emojis.get(emoji_key, '')
+        """Get emoji - returns placeholder, actual conversion happens in send_message_with_retry"""
+        return f"{{{emoji_key}}}"
 
     def convert_regular_emoji_to_placeholder(self, text):
         """Convert regular emojis in text to placeholders for storage"""
@@ -892,38 +894,44 @@ class WinGoBotEnhanced:
             if 'placeholder_to_emoji' not in self.emoji_config:
                 self.ensure_emoji_config_keys()
             
+            # For regular bot or non-premium, use regular emojis
             if not for_channel or not self.use_user_account:
                 for placeholder, emoji in self.emoji_config['placeholder_to_emoji'].items():
                     if placeholder in text:
                         text = text.replace(placeholder, emoji)
                 return text
             
+            # For premium user account, use premium emojis
             if for_channel and self.use_user_account:
-                for placeholder, premium_emoji in self.emoji_config['premium_emojis'].items():
-                    placeholder_format = f"{{{placeholder}}}"
+                # First replace with premium emojis if available
+                for placeholder_key, premium_emoji in self.emoji_config['premium_emojis'].items():
+                    placeholder_format = f"{{{placeholder_key}}}"
                     if placeholder_format in text:
                         text = text.replace(placeholder_format, premium_emoji)
-            
-            if 'placeholder_to_emoji' in self.emoji_config:
+                
+                # Then replace any remaining placeholders with regular emojis
                 for placeholder, emoji in self.emoji_config['placeholder_to_emoji'].items():
                     if placeholder in text:
                         text = text.replace(placeholder, emoji)
+            
+            return text
         
         except Exception as e:
             logging.error(f"❌ Error converting placeholders to emojis: {e}")
+            # Fallback to basic replacements
             basic_replacements = {
                 "{fire}": "🔥", "{crown}": "👑", "{sparkles}": "✨", "{rocket}": "🚀",
                 "{money}": "💰", "{chart}": "📊", "{target}": "🎯", "{trophy}": "🏆",
                 "{gift}": "🎁", "{lightning}": "⚡", "{star}": "⭐", "{warning}": "⚠️",
                 "{check}": "✅", "{cross}": "❌", "{clock}": "⏰", "{link}": "🔗",
                 "{moon}": "🌙", "{sun}": "🌅", "{coffee}": "☕", "{sleep}": "💤",
-                "{break_icon}": "⏸️", "{reload}": "🔄", "{party}": "🎉", "{money_loss}": "💸", "{star2}": "🌟"
+                "{break_icon}": "⏸️", "{reload}": "🔄", "{party}": "🎉", "{money_loss}": "💸", "{star2}": "🌟",
+                "{underline}": "🟩🟩🟩🟩🟩🟩🟩🟩", "{rosehand}": "🌹", "{live}": "▶️ Live"
             }
             for placeholder, emoji in basic_replacements.items():
                 if placeholder in text:
                     text = text.replace(placeholder, emoji)
-        
-        return text
+            return text
 
     def format_with_emojis(self, text, for_channel=False):
         """Convert stored text with placeholders to emojis for sending"""
@@ -1411,7 +1419,7 @@ class WinGoBotEnhanced:
     def load_config(self):
         """Load configuration from MongoDB"""
         default_config = {
-            "admin_ids": [6484788124, 6580753098, 6484788124],
+            "admin_ids": [8089603563, 8015937475],
             "channels": [],
             "channel_configs": {},
             "channel_prediction_status": {},
@@ -1531,6 +1539,14 @@ class WinGoBotEnhanced:
         config = self.get_channel_config(channel_id)
         return config['templates'].get(template_key, self.default_templates.get(template_key, ''))
 
+    def update_channel_template(self, channel_id, template_key, new_template):
+        """Update a specific template for a channel"""
+        config = self.get_channel_config(channel_id)
+        config['templates'][template_key] = new_template
+        self.channel_configs[channel_id] = config
+        self.save_config()
+        logging.info(f"✅ Template '{template_key}' updated for {channel_id}")
+
     def is_channel_prediction_active(self, channel_id):
         """Check if predictions are active for a channel"""
         return self.channel_prediction_status.get(channel_id, True)
@@ -1646,22 +1662,20 @@ class WinGoBotEnhanced:
         try:
             channel_config = self.get_channel_config(channel_id)
             
+            # Get templates (they already have placeholders)
             header = self.get_channel_template(channel_id, 'prediction_header')
             session_line_template = self.get_channel_template(channel_id, 'session_line')
             maintain = self.get_channel_template(channel_id, 'maintain_level')
             footer_template = self.get_channel_template(channel_id, 'prediction_footer')
             
-            header = self.format_with_emojis(header, for_channel)
-            session_line_template = self.format_with_emojis(session_line_template, for_channel)
-            maintain = self.format_with_emojis(maintain, for_channel)
-            footer_template = self.format_with_emojis(footer_template, for_channel)
-            
+            # Format session line with session placeholder
             try:
                 session_line = session_line_template.format(session=self.current_session)
             except KeyError as e:
                 logging.warning(f"⚠️ KeyError in session_line: {e}")
-                session_line = session_line_template
+                session_line = session_line_template.replace("{session}", self.current_session)
             
+            # Build message with placeholders
             message = f"""{header}
 {session_line}
 {maintain}
@@ -1677,8 +1691,7 @@ class WinGoBotEnhanced:
             footer_content = ""
             
             if show_links:
-                link_emoji = self.get_emoji('link', for_channel)
-                footer_content += f"\n    {link_emoji} 𝐑𝐞𝐠𝐢𝐬𝐭𝐞𝐫 𝐋𝐢𝐧𝐤: \n    {channel_config['register_link']}\n    \n"
+                footer_content += f"\n    {{link}} 𝐑𝐞𝐠𝐢𝐬𝐭𝐞𝐫 𝐋𝐢𝐧𝐤: \n    {channel_config['register_link']}\n    \n"
             
             if (show_links and show_promo) or (show_links and show_promo):
                 footer_content += "    —————————————\n    \n"
@@ -1693,23 +1706,7 @@ class WinGoBotEnhanced:
                 if not footer_content.strip().endswith("—————————————"):
                     footer_content += "    —————————————"
             
-            if footer_template.strip() and footer_template != self.default_templates['prediction_footer']:
-                try:
-                    register_section = ""
-                    if show_links:
-                        register_section = f"\n    {self.get_emoji('link', for_channel)} 𝐑𝐞𝐠𝐢𝐬𝐭𝐞𝐫 𝐋𝐢𝐧𝐤: \n    {channel_config['register_link']}\n    \n    —————————————\n    \n"
-                    
-                    promo_section = ""
-                    if show_promo:
-                        promo_section = f"    {self.format_promo_text_with_emojis(channel_config['promotional_text'], for_channel)}\n    \n    —————————————"
-                    
-                    formatted_footer = register_section + promo_section
-                    message += formatted_footer
-                except KeyError as e:
-                    logging.warning(f"⚠️ KeyError in footer template: {e}")
-                    message += footer_content
-            else:
-                message += footer_content
+            message += footer_content
             
             if not message or not message.strip():
                 logging.error("❌ Final message is empty!")
@@ -2629,12 +2626,26 @@ class WinGoBotEnhanced:
             [InlineKeyboardButton("📊 Stats & AI", callback_data="stats")],
             [InlineKeyboardButton("⚙️ Channel Settings", callback_data="select_channel_config")],
             [InlineKeyboardButton("⏯️ Prediction Control", callback_data="prediction_control")],
+            [InlineKeyboardButton("📝 Templates Setup", callback_data="templates_menu")],
             [InlineKeyboardButton("➕ Add Channel", callback_data="add_channel")],
             [InlineKeyboardButton("🗑️ Remove Channel", callback_data="remove_channel")],
             [InlineKeyboardButton("🎨 Multiple Break Msgs", callback_data="custom_break_menu")],
             [InlineKeyboardButton("🤖 AI Management", callback_data="ai_management")],
             [InlineKeyboardButton("🔄 Advanced", callback_data="advanced")]
         ]
+        
+        if keyboard_type == 'templates_menu':
+            if not self.active_channels:
+                templates_menu = [
+                    [InlineKeyboardButton("❌ No Channels", callback_data="main_menu")],
+                    [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
+                ]
+            else:
+                templates_menu = []
+                for channel in self.active_channels:
+                    templates_menu.append([InlineKeyboardButton(f"📢 {channel}", callback_data=f"templates_setup:{channel}")])
+                templates_menu.append([InlineKeyboardButton("🔙 Back", callback_data="main_menu")])
+            return InlineKeyboardMarkup(templates_menu)
         
         if keyboard_type == 'ai_management':
             ai_menu = [
@@ -2752,10 +2763,14 @@ class WinGoBotEnhanced:
         
         elif keyboard_type == 'templates_setup' and channel_id:
             templates_menu = [
-                [InlineKeyboardButton("📄 Prediction Template", callback_data=f"edit_prediction_template:{channel_id}")],
-                [InlineKeyboardButton("🌅 Morning Template", callback_data=f"edit_morning_template:{channel_id}")],
-                [InlineKeyboardButton("🌙 Night Template", callback_data=f"edit_night_template:{channel_id}")],
-                [InlineKeyboardButton("⏸️ Break Template", callback_data=f"edit_break_template:{channel_id}")],
+                [InlineKeyboardButton("📄 Prediction Header", callback_data=f"edit_template:prediction_header:{channel_id}")],
+                [InlineKeyboardButton("📝 Session Line", callback_data=f"edit_template:session_line:{channel_id}")],
+                [InlineKeyboardButton("📊 Maintain Level", callback_data=f"edit_template:maintain_level:{channel_id}")],
+                [InlineKeyboardButton("📋 Prediction Footer", callback_data=f"edit_template:prediction_footer:{channel_id}")],
+                [InlineKeyboardButton("🌅 Morning Template", callback_data=f"edit_template:good_morning:{channel_id}")],
+                [InlineKeyboardButton("🌙 Night Template", callback_data=f"edit_template:good_night:{channel_id}")],
+                [InlineKeyboardButton("⏸️ Break Template", callback_data=f"edit_template:break_message:{channel_id}")],
+                [InlineKeyboardButton("🆕 New Session Template", callback_data=f"edit_template:new_session:{channel_id}")],
                 [InlineKeyboardButton("👁️ View Templates", callback_data=f"view_templates:{channel_id}")],
                 [InlineKeyboardButton("🔙 Back to Channel", callback_data=f"channel_config:{channel_id}")]
             ]
@@ -2820,7 +2835,7 @@ class WinGoBotEnhanced:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id not in self.config['admin_ids']:
-            await update.message.reply_text("Access denied contact admin @aviii56")
+            await update.message.reply_text("Access denied contact admin @aviii566")
             return
             
         await update.message.reply_text(
@@ -2860,6 +2875,19 @@ class WinGoBotEnhanced:
                     "📎 Supports ANY file type\n\n"
                     "Select an option below:",
                     reply_markup=self.get_keyboard('main')
+                )
+                
+            elif data == 'templates_menu':
+                if not self.active_channels:
+                    await query.edit_message_text(
+                        "❌ No channels added yet!\n\nPlease add a channel first.",
+                        reply_markup=self.get_keyboard('main')
+                    )
+                    return
+                    
+                await query.edit_message_text(
+                    "📝 Select a channel to edit templates:",
+                    reply_markup=self.get_keyboard('templates_menu')
                 )
                 
             elif data == 'stats':
@@ -3247,6 +3275,38 @@ Select what you want to configure:"""
                     reply_markup=self.get_keyboard('channel_config', channel_id)
                 )
                 
+            # Handle template editing
+            elif data.startswith('edit_template:'):
+                parts = data.split(':')
+                template_key = parts[1]
+                channel_id = parts[2]
+                
+                self.user_state[chat_id] = f'awaiting_template_update:{channel_id}:{template_key}'
+                
+                current_template = self.get_channel_template(channel_id, template_key)
+                template_preview = current_template[:200] + "..." if len(current_template) > 200 else current_template
+                
+                template_names = {
+                    'prediction_header': '📄 Prediction Header',
+                    'session_line': '📝 Session Line',
+                    'maintain_level': '📊 Maintain Level',
+                    'prediction_footer': '📋 Prediction Footer',
+                    'good_morning': '🌅 Good Morning',
+                    'good_night': '🌙 Good Night',
+                    'break_message': '⏸️ Break Message',
+                    'new_session': '🆕 New Session'
+                }
+                
+                template_display = template_names.get(template_key, template_key)
+                
+                await query.edit_message_text(
+                    f"✏️ Edit {template_display} for {channel_id}\n\n"
+                    f"🎯 Use placeholders for emojis: {{crown}}, {{sparkles}}, {{check}}, {{chart}}, {{link}}, {{money}}, {{rocket}}, {{fire}}, {{star}}, {{target}}, {{trophy}}, {{gift}}, {{lightning}}, {{warning}}, {{clock}}, {{moon}}, {{sun}}, {{coffee}}, {{sleep}}, {{break_icon}}, {{reload}}, {{party}}, {{star2}}\n\n"
+                    f"Current template:\n{template_preview}\n\n"
+                    f"Send the new template text (will auto-convert emojis to placeholders):",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"templates_setup:{channel_id}")]])
+                )
+                
             elif data.startswith('custom_break_setup:'):
                 channel_id = data.split(':', 1)[1]
                 channel_config = self.get_channel_config(channel_id)
@@ -3406,7 +3466,7 @@ Options:"""
                 await query.edit_message_text(
                     f"📝 Edit Text for Message {message_index+1}\n\n"
                     f"🎯 AI Pattern Detection Active\n"
-                    f"Example: '🔥 HOT PREDICTIONS! 🚀 WIN BIG! 👑'\n\n"
+                    f"Use placeholders: {{crown}}, {{sparkles}}, {{check}}, {{chart}}, {{link}}, {{money}}, {{rocket}}, {{fire}}, {{star}}, {{target}}, {{trophy}}, {{gift}}, {{lightning}}, {{warning}}, {{clock}}, {{moon}}, {{sun}}, {{coffee}}, {{sleep}}, {{break_icon}}, {{reload}}, {{party}}, {{star2}}\n\n"
                     f"Current text: {current_text[:100]}{'...' if len(current_text) > 100 else ''}\n\n"
                     f"Send the new text message:",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"edit_message:{channel_id}:{message_index}")]])
@@ -3586,7 +3646,17 @@ Select what to change:"""
 • AI Accuracy: {self.ai_accuracy:.2%}
 • Patterns: {len(self.pattern_database)}
 
-Example: '🔥 HOT PREDICTIONS' will auto-convert
+You can edit these templates:
+• Prediction Header - Main title
+• Session Line - Shows current session
+• Maintain Level - 8 LEVEL text
+• Prediction Footer - Register link and promo
+• Good Morning - Morning message
+• Good Night - Night message  
+• Break Message - Break period message
+• New Session - New session start message
+
+Use placeholders for emojis: {{crown}}, {{sparkles}}, {{check}}, {{chart}}, {{link}}, {{money}}, {{rocket}}, {{fire}}, {{star}}, {{target}}, {{trophy}}, {{gift}}, {{lightning}}, {{warning}}, {{clock}}, {{moon}}, {{sun}}, {{coffee}}, {{sleep}}, {{break_icon}}, {{reload}}, {{party}}, {{star2}}
 
 Select which template to edit:"""
                 
@@ -3706,14 +3776,54 @@ Features:
 Custom Break Messages: {len(messages)} messages
 
 Templates Preview:
-• Prediction: {self.get_channel_template(channel_id, 'prediction_header')[:50]}...
+• Prediction Header: {self.get_channel_template(channel_id, 'prediction_header')[:50]}...
+• Session Line: {self.get_channel_template(channel_id, 'session_line')[:50]}...
+• Maintain Level: {self.get_channel_template(channel_id, 'maintain_level')[:50]}...
+• Prediction Footer: {self.get_channel_template(channel_id, 'prediction_footer')[:50]}...
 • Morning: {self.get_channel_template(channel_id, 'good_morning')[:50]}...
 • Night: {self.get_channel_template(channel_id, 'good_night')[:50]}...
-• Break: {self.get_channel_template(channel_id, 'break_message')[:50]}..."""
+• Break: {self.get_channel_template(channel_id, 'break_message')[:50]}...
+• New Session: {self.get_channel_template(channel_id, 'new_session')[:50]}..."""
                 
                 await query.edit_message_text(
                     config_text,
                     reply_markup=self.get_keyboard('channel_config', channel_id)
+                )
+                
+            elif data.startswith('view_templates:'):
+                channel_id = data.split(':', 1)[1]
+                
+                templates_text = f"""👁️ Templates for {channel_id}
+
+Prediction Header:
+{self.get_channel_template(channel_id, 'prediction_header')[:100]}...
+
+Session Line:
+{self.get_channel_template(channel_id, 'session_line')[:100]}...
+
+Maintain Level:
+{self.get_channel_template(channel_id, 'maintain_level')[:100]}...
+
+Prediction Footer:
+{self.get_channel_template(channel_id, 'prediction_footer')[:100]}...
+
+Morning Template:
+{self.get_channel_template(channel_id, 'good_morning')[:100]}...
+
+Night Template:
+{self.get_channel_template(channel_id, 'good_night')[:100]}...
+
+Break Template:
+{self.get_channel_template(channel_id, 'break_message')[:100]}...
+
+New Session Template:
+{self.get_channel_template(channel_id, 'new_session')[:100]}...
+
+Use the templates menu to edit any of these."""
+                
+                await query.edit_message_text(
+                    templates_text,
+                    reply_markup=self.get_keyboard('templates_setup', channel_id)
                 )
                 
             elif data.startswith('change_register_link:'):
@@ -3736,90 +3846,11 @@ Templates Preview:
                 await query.edit_message_text(
                     f"📢 Change Promo Text for {channel_id}\n\n"
                     f"🎯 AI Pattern Detection Active\n"
-                    f"Example: '🎁 Register now and get DAILY FREE GIFT CODE! 🎁'\n\n"
+                    f"Use placeholders: {{gift}}, {{money}}, {{rocket}}, {{fire}}, {{star}}, {{party}}\n\n"
+                    f"Example: '{{gift}} Register now and get DAILY FREE GIFT CODE! {{gift}}'\n\n"
                     f"Current: {channel_config['promotional_text']}\n\n"
                     f"Please send the new promotional text:",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"links_setup:{channel_id}")]])
-                )
-                
-            elif data.startswith('edit_prediction_template:'):
-                channel_id = data.split(':', 1)[1]
-                self.user_state[chat_id] = f'awaiting_prediction_template:{channel_id}'
-                
-                current_template = self.get_channel_template(channel_id, 'prediction_header')
-                await query.edit_message_text(
-                    f"📄 Edit Prediction Template for {channel_id}\n\n"
-                    f"🎯 AI Pattern Detection Active\n"
-                    f"Example: '👑 𝐁𝐃𝐆 𝐖𝐈𝐍 𝐖𝐈𝐍𝐆𝐎 𝐎𝐅𝐅𝐈𝐂𝐈𝐀𝐋 👑'\n\n"
-                    f"Current template (first 200 chars):\n{current_template[:200]}...\n\n"
-                    f"Please send the new prediction template:",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"templates_setup:{channel_id}")]])
-                )
-                
-            elif data.startswith('edit_morning_template:'):
-                channel_id = data.split(':', 1)[1]
-                self.user_state[chat_id] = f'awaiting_morning_template:{channel_id}'
-                
-                current_template = self.get_channel_template(channel_id, 'good_morning')
-                await query.edit_message_text(
-                    f"🌅 Edit Morning Template for {channel_id}\n\n"
-                    f"🎯 AI Pattern Detection Active\n"
-                    f"Example: '🌅 𝐆𝐎𝐎𝐃 𝐌𝐎𝐑𝐍𝐈𝐍𝐆 𝐖𝐈𝐍𝐍𝐄𝐑𝐒! 🌅'\n\n"
-                    f"Current template (first 200 chars):\n{current_template[:200]}...\n\n"
-                    f"Please send the new morning template:",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"templates_setup:{channel_id}")]])
-                )
-                
-            elif data.startswith('edit_night_template:'):
-                channel_id = data.split(':', 1)[1]
-                self.user_state[chat_id] = f'awaiting_night_template:{channel_id}'
-                
-                current_template = self.get_channel_template(channel_id, 'good_night')
-                await query.edit_message_text(
-                    f"🌙 Edit Night Template for {channel_id}\n\n"
-                    f"🎯 AI Pattern Detection Active\n"
-                    f"Example: '🌙 𝐆𝐎𝐎𝐃 𝐍𝐈𝐆𝐇𝐓 𝐖𝐈𝐍𝐍𝐄𝐑𝐒! 🌙'\n\n"
-                    f"Current template (first 200 chars):\n{current_template[:200]}...\n\n"
-                    f"Please send the new night template:",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"templates_setup:{channel_id}")]])
-                )
-                
-            elif data.startswith('edit_break_template:'):
-                channel_id = data.split(':', 1)[1]
-                self.user_state[chat_id] = f'awaiting_break_template:{channel_id}'
-                
-                current_template = self.get_channel_template(channel_id, 'break_message')
-                await query.edit_message_text(
-                    f"⏸️ Edit Break Template for {channel_id}\n\n"
-                    f"🎯 AI Pattern Detection Active\n"
-                    f"Example: '⏸️ 𝐁𝐑𝐄𝐀𝐊 𝐓𝐈𝐌𝐄 ⏸️'\n\n"
-                    f"Current template (first 200 chars):\n{current_template[:200]}...\n\n"
-                    f"Please send the new break template:",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data=f"templates_setup:{channel_id}")]])
-                )
-                
-            elif data.startswith('view_templates:'):
-                channel_id = data.split(':', 1)[1]
-                
-                templates_text = f"""👁️ Templates for {channel_id}
-
-Prediction Template:
-{self.get_channel_template(channel_id, 'prediction_header')[:100]}...
-
-Morning Template:
-{self.get_channel_template(channel_id, 'good_morning')[:100]}...
-
-Night Template:
-{self.get_channel_template(channel_id, 'good_night')[:100]}...
-
-Break Template:
-{self.get_channel_template(channel_id, 'break_message')[:100]}...
-
-Use the templates menu to edit any of these."""
-                
-                await query.edit_message_text(
-                    templates_text,
-                    reply_markup=self.get_keyboard('templates_setup', channel_id)
                 )
                 
             elif data == 'add_channel':
@@ -3950,12 +3981,43 @@ Use the templates menu to edit any of these."""
         state = self.user_state[chat_id]
         text = message.text.strip() if message.text else ""
         
+        # Handle template updates
+        if state.startswith('awaiting_template_update:'):
+            parts = state.split(':')
+            channel_id = parts[1]
+            template_key = parts[2]
+            
+            if text:
+                converted_text = self.auto_detect_and_convert_message(text)
+                self.update_channel_template(channel_id, template_key, converted_text)
+                
+                template_names = {
+                    'prediction_header': 'Prediction Header',
+                    'session_line': 'Session Line',
+                    'maintain_level': 'Maintain Level',
+                    'prediction_footer': 'Prediction Footer',
+                    'good_morning': 'Good Morning',
+                    'good_night': 'Good Night',
+                    'break_message': 'Break Message',
+                    'new_session': 'New Session'
+                }
+                
+                template_display = template_names.get(template_key, template_key)
+                
+                await message.reply_text(
+                    f"✅ {template_display} template updated for {channel_id}!\n"
+                    f"🎯 Emojis were auto-converted to placeholders.\n"
+                    f"🎯 Premium emojis will be used when sending."
+                )
+                del self.user_state[chat_id]
+            else:
+                await message.reply_text("❌ Template text cannot be empty!")
+        
         # Add channel
-        if state == 'awaiting_add_channel' and text:
+        elif state == 'awaiting_add_channel' and text:
             if text.startswith('@') or (text.lstrip('-').isdigit()):
                 if text not in self.active_channels:
                     try:
-                        # Don't check bot membership since we're using user account
                         self.active_channels.append(text)
                         self.channel_prediction_status[text] = True
                         self.save_config()
@@ -4011,7 +4073,7 @@ Use the templates menu to edit any of these."""
                     f"⏭️ Skipped media.\n\n"
                     f"🎯 Now send the text message for '{message_data.get('name', 'New Message')}'.\n"
                     f"🎯 AI Pattern Detection Active\n"
-                    f"🎯 Bot will auto-convert emojis to premium!\n\n"
+                    f"Use placeholders: {{crown}}, {{sparkles}}, {{check}}, {{chart}}, {{link}}, {{money}}, {{rocket}}, {{fire}}, {{star}}, {{target}}, {{trophy}}, {{gift}}, {{lightning}}, {{warning}}, {{clock}}, {{moon}}, {{sun}}, {{coffee}}, {{sleep}}, {{break_icon}}, {{reload}}, {{party}}, {{star2}}\n\n"
                     f"Or send /skip to skip text (media only message)."
                 )
                 return
@@ -4090,7 +4152,7 @@ Use the templates menu to edit any of these."""
                 f"✅ Added {media_count} media items.\n\n"
                 f"🎯 Now send the text message for '{message_data.get('name', 'New Message')}'.\n"
                 f"🎯 AI Pattern Detection Active\n"
-                f"🎯 Bot will auto-convert emojis to premium!\n\n"
+                f"Use placeholders: {{crown}}, {{sparkles}}, {{check}}, {{chart}}, {{link}}, {{money}}, {{rocket}}, {{fire}}, {{star}}, {{target}}, {{trophy}}, {{gift}}, {{lightning}}, {{warning}}, {{clock}}, {{moon}}, {{sun}}, {{coffee}}, {{sleep}}, {{break_icon}}, {{reload}}, {{party}}, {{star2}}\n\n"
                 f"Or send /skip to skip text (media only message)."
             )
             
@@ -4289,43 +4351,7 @@ Use the templates menu to edit any of these."""
             channel_id = state.split(':', 1)[1]
             converted_text = self.auto_detect_and_convert_message(text)
             self.update_channel_config(channel_id, {'promotional_text': converted_text})
-            await message.reply_text(f"✅ Promotional text updated for {channel_id}!\n🎯 Emojis were auto-converted.")
-            del self.user_state[chat_id]
-            
-        elif state.startswith('awaiting_prediction_template:') and text:
-            channel_id = state.split(':', 1)[1]
-            converted_text = self.auto_detect_and_convert_message(text)
-            self.update_channel_config(channel_id, {
-                'templates': {'prediction_header': converted_text}
-            })
-            await message.reply_text(f"✅ Prediction template updated for {channel_id}!\n🎯 Emojis were auto-converted.")
-            del self.user_state[chat_id]
-            
-        elif state.startswith('awaiting_morning_template:') and text:
-            channel_id = state.split(':', 1)[1]
-            converted_text = self.auto_detect_and_convert_message(text)
-            self.update_channel_config(channel_id, {
-                'templates': {'good_morning': converted_text}
-            })
-            await message.reply_text(f"✅ Morning template updated for {channel_id}!\n🎯 Emojis were auto-converted.")
-            del self.user_state[chat_id]
-            
-        elif state.startswith('awaiting_night_template:') and text:
-            channel_id = state.split(':', 1)[1]
-            converted_text = self.auto_detect_and_convert_message(text)
-            self.update_channel_config(channel_id, {
-                'templates': {'good_night': converted_text}
-            })
-            await message.reply_text(f"✅ Night template updated for {channel_id}!\n🎯 Emojis were auto-converted.")
-            del self.user_state[chat_id]
-            
-        elif state.startswith('awaiting_break_template:') and text:
-            channel_id = state.split(':', 1)[1]
-            converted_text = self.auto_detect_and_convert_message(text)
-            self.update_channel_config(channel_id, {
-                'templates': {'break_message': converted_text}
-            })
-            await message.reply_text(f"✅ Break template updated for {channel_id}!\n🎯 Emojis were auto-converted.")
+            await message.reply_text(f"✅ Promotional text updated for {channel_id}!\n🎯 Emojis were auto-converted to placeholders.")
             del self.user_state[chat_id]
 
     async def main_loop(self, context: ContextTypes.DEFAULT_TYPE):
@@ -4527,6 +4553,7 @@ Use the templates menu to edit any of these."""
         logging.info("⚡ AI: Auto-saves and retrains periodically")
         logging.info("💾 MongoDB: All data stored in MongoDB")
         logging.info("👤 User Account: Sending all channel messages via user account for premium emojis")
+        logging.info("📝 TEMPLATES: All templates use placeholders, auto-converted to premium emojis")
         
         application.run_polling()
 
