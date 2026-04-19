@@ -4562,7 +4562,7 @@ if __name__ == "__main__":
     
     API_ID = 21538384
     API_HASH = "9b8e9b10a5c34b67054aceca02bf423e"
-    PHONE = "+919341451832"
+    PHONE = "+916200418776"
     
     bot = WinGoBotEnhanced(BOT_TOKEN, api_id=API_ID, api_hash=API_HASH, phone=PHONE)
     bot.run()
